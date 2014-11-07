@@ -17,8 +17,6 @@
 
 package org.apache.spark.mllib.tree.impl
 
-import scala.collection.mutable
-
 import org.apache.spark.SparkContext._
 import org.apache.spark.mllib.linalg.{DenseVector, Vectors, Vector}
 import org.apache.spark.rdd.RDD
@@ -49,6 +47,8 @@ private[tree] object Util {
    * TODO: Move elsewhere in MLlib.
    */
   def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Vector)] = {
+    import scala.collection.mutable.ArrayBuffer
+
     val numRows = {
       val longNumRows: Long = rowStore.count()
       require(longNumRows < Int.MaxValue, s"rowToColumnStore given RDD with $longNumRows rows," +
@@ -87,10 +87,10 @@ private[tree] object Util {
         // columnSets(groupIndex)(colIdx)
         //   = column values for each instance in sourcePartitionIndex,
         // where colIdx is a 0-based index for columns for groupIndex
-        val columnSets = new Array[Array[mutable.ArrayBuffer[Double]]](numTargetPartitions)
+        val columnSets = new Array[Array[ArrayBuffer[Double]]](numTargetPartitions)
         Range(0, numTargetPartitions).foreach { groupIndex =>
           columnSets(groupIndex) =
-            Array.fill[mutable.ArrayBuffer[Double]](getNumColsInGroup(groupIndex))(mutable.ArrayBuffer[Double]())
+            Array.fill[ArrayBuffer[Double]](getNumColsInGroup(groupIndex))(ArrayBuffer[Double]())
         }
         iterator.foreach { row =>
           Range(0, numTargetPartitions).foreach { groupIndex =>
