@@ -1,36 +1,30 @@
-package org.apache.spark.mllib.tree
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.spark.mllib.tree.impl
 
 import scala.collection.mutable
 
-import org.apache.spark.Logging
 import org.apache.spark.SparkContext._
-import org.apache.spark.annotation.Experimental
 import org.apache.spark.mllib.linalg.{DenseVector, Vectors, Vector}
-import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.tree.configuration.Strategy
-import org.apache.spark.mllib.tree.model.{DecisionTreeModel, Node}
 import org.apache.spark.rdd.RDD
 
 
-/**
- * DecisionTree which partitions data by feature.
- *
- * Algorithm:
- *  - Repartition data, grouping by feature.
- *  - Prep data (sort continuous features).
- *  - On each partition, initialize instance--node map with each instance at root node.
- *  - Iterate, training 1 new level of the tree at a time:
- *     - On each partition,
- *        - For each node, select best split (among that partition's features).
- *     - Aggregate best split for each node.
- *     - Aggregate bit vector (1 bit/instance) indicating whether each instance splits
- *       left or right.
- *     - Broadcast bit vector.  On each partition, update instance--node map.
- */
-@Experimental
-class AltDT (private val strategy: Strategy) extends Serializable with Logging {
-
-  strategy.assertValid()
+private[tree] object Util {
 
   /**
    * Convert a dataset of [[DenseVector]] from row storage to column storage.
@@ -55,14 +49,15 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
    * TODO: Move elsewhere in MLlib.
    */
   def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Vector)] = {
-    /*
     val numRows = {
       val longNumRows: Long = rowStore.count()
       require(longNumRows < Int.MaxValue, s"rowToColumnStore given RDD with $longNumRows rows," +
         s" but can handle at most ${Int.MaxValue} rows")
       longNumRows.toInt
     }
-    */
+    if (numRows == 0) {
+      return rowStore.sparkContext.parallelize(Seq.empty[(Int, DenseVector)])
+    }
     val numCols = rowStore.take(1)(0).size
     val numSourcePartitions = rowStore.partitions.size
     val numTargetPartitions = Math.min(numCols, rowStore.partitions.size)
@@ -95,7 +90,7 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
         val columnSets = new Array[Array[mutable.ArrayBuffer[Double]]](numTargetPartitions)
         Range(0, numTargetPartitions).foreach { groupIndex =>
           columnSets(groupIndex) =
-            new Array[mutable.ArrayBuffer[Double]](getNumColsInGroup(groupIndex))
+            Array.fill[mutable.ArrayBuffer[Double]](getNumColsInGroup(groupIndex))(mutable.ArrayBuffer[Double]())
         }
         iterator.foreach { row =>
           Range(0, numTargetPartitions).foreach { groupIndex =>
@@ -153,28 +148,4 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
 
     fullColumns
   }
-
-  /**
-   * This uses [[rowToColumnStore()]] for shuffling the features, so it comes with the same
-   * guarantees.  This then groups each partition's features together into an array and pairs it
-   * with a vector of all labels.
-   * @param rowStore  Dataset in row-storage format
-   * @return RDD of
-   */
-  def rowToColumnStoreWithLabels(
-      rowStore: RDD[LabeledPoint]): RDD[(Vector, Array[(Int, Vector)])] = {
-  }
-
-  /**
-   * Method to train a decision tree model over an RDD
-   * @param input Training data: RDD of [[org.apache.spark.mllib.regression.LabeledPoint]]
-   * @return DecisionTreeModel that can be used for prediction
-   */
-  def train(input: RDD[LabeledPoint]): DecisionTreeModel = {
-
-  }
-
-}
-
-object AltDT extends Serializable with Logging {
 }
