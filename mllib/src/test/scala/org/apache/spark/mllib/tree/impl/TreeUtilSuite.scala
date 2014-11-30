@@ -17,17 +17,20 @@
 
 package org.apache.spark.mllib.tree.impl
 
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
-import org.apache.spark.mllib.tree.impl.Util._
-import org.apache.spark.mllib.util.LocalSparkContext
+import scala.collection.mutable
+
 import org.scalatest.FunSuite
+
+import org.apache.spark.mllib.linalg.{SparseVector, DenseVector, Vector, Vectors}
+import org.apache.spark.mllib.tree.impl.Util._
+import org.apache.spark.mllib.util.MLlibTestSparkContext
 
 /**
  * Test suite for [[org.apache.spark.mllib.tree.impl.Util]].
  */
-class TreeUtilSuite extends FunSuite with LocalSparkContext  {
+class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
 
-  private def check(rows: Seq[Vector]): Unit = {
+  private def checkDense(rows: Seq[Vector]): Unit = {
     val numRowPartitions = 2
     val rowStore = sc.parallelize(rows, numRowPartitions)
     val colStore = rowToColumnStoreDense(rowStore)
@@ -50,39 +53,119 @@ class TreeUtilSuite extends FunSuite with LocalSparkContext  {
         j += 1
       }
     }
-    val expectedNumColPartitions = Math.min(rowStore.partitions.size, numCols)
+    val expectedNumColPartitions = math.min(rowStore.partitions.size, numCols)
     assert(numColPartitions === expectedNumColPartitions)
   }
 
-  test("rowToColumnStoreDense: small") {
+  private def checkSparse(rows: Seq[Vector]): Unit = {
+    val numRowPartitions = 2
+    val overPartitionFactor = 2
+    val rowStore = sc.parallelize(rows, numRowPartitions)
+    val colStore = rowToColumnStoreSparse(rowStore, overPartitionFactor)
+    val numColPartitions = colStore.partitions.size
+    val cols: Map[Int, Vector] = colStore.collect().toMap
+    val numRows = rows.size
+    // Check cases with 0 rows or cols
+    if (numRows == 0) {
+      assert(cols.size == 0)
+      return
+    }
+    val numCols = rows(0).size
+    if (numCols == 0) {
+      assert(cols.size == 0)
+      return
+    }
+    // Check values (and count non-zeros too)
+    var expectedNumNonZeros = 0
+    rows.zipWithIndex.foreach { case (row, i) =>
+      var j = 0
+      while (j < numCols) {
+        assert(row(j) == cols(j)(i))
+        if (row(j) != 0) expectedNumNonZeros += 1
+        j += 1
+      }
+    }
+    // Check sparsity
+    val numNonZeros = cols.values.map {
+      case sv: SparseVector => sv.indices.size
+      case _ => throw new RuntimeException(
+        "checkSparse() found column which was not converted to SparseVector.")
+    }.sum
+    assert(numNonZeros === expectedNumNonZeros)
+    // Check partitions to make sure they each contain consecutive columns.
+    val colsByPartition: Array[(Int, Array[(Int, Vector)])] = colStore.mapPartitionsWithIndex {
+      case (partitionIndex, iterator) =>
+        val partCols = new mutable.ArrayBuffer[(Int, Vector)]
+        iterator.foreach(col => partCols += col)
+        Iterator((partitionIndex, iterator.toArray))
+    }.collect()
+    colsByPartition.foreach { case (partitionIndex, partCols) =>
+      var j = 0
+      while (j + 1 < partCols.size) {
+        val curColIndex = partCols(j)._1
+        val nextColIndex = partCols(j + 1)._1
+        assert(curColIndex + 1 == nextColIndex)
+        j += 1
+      }
+    }
+  }
+
+  test("rowToColumnStore: small dense") {
     val rows = Seq(
       Vectors.dense(1.0, 2.0, 3.0, 4.0),
       Vectors.dense(1.1, 2.1, 3.1, 4.1),
       Vectors.dense(1.2, 2.2, 3.2, 4.2)
     )
-    check(rows)
+    checkDense(rows)
+    checkSparse(rows)
   }
 
-  test("rowToColumnStoreDense: large") {
+  test("rowToColumnStore: small sparse") {
+    val rows = Seq(
+      Vectors.sparse(4, Array(0, 1), Array(1.0, 2.0)),
+      Vectors.sparse(4, Array(1, 2), Array(1.1, 2.1)),
+      Vectors.sparse(4, Array(2, 3), Array(1.2, 2.2))
+    )
+    checkDense(rows)
+    checkSparse(rows)
+  }
+
+  test("rowToColumnStore: large dense") {
+    // Note: All values must be non-zero since rowToColumnStoreSparse() automatically ignores
+    //       zero-valued elements.
     var numRows = 100
     var numCols = 90
     val rows = Range(0, numRows).map { i =>
-      Vectors.dense(Range(0, numCols).map(_ + numCols * i + 0.0).toArray)
+      Vectors.dense(Range(0, numCols).map(_ + numCols * i + 1.0).toArray)
     }
-    check(rows)
+    checkDense(rows)
+    checkSparse(rows)
   }
 
-  test("rowToColumnStoreDense: 0 rows") {
+  test("rowToColumnStore: mixed dense and sparse") {
+    val rows = Seq(
+      Vectors.dense(1.0, 2.0, 3.0, 4.0),
+      Vectors.sparse(4, Array(1, 2), Array(1.1, 2.1)),
+      Vectors.dense(1.2, 2.2, 3.2, 4.2),
+      Vectors.sparse(4, Array(0, 2), Array(1.3, 2.3))
+    )
+    checkDense(rows)
+    checkSparse(rows)
+  }
+
+  test("rowToColumnStore: 0 rows") {
     val rows = Seq.empty[Vector]
-    check(rows)
+    checkDense(rows)
+    checkSparse(rows)
   }
 
-  test("rowToColumnStoreDense: 0 cols") {
+  test("rowToColumnStore: 0 cols") {
     val rows = Seq(
       Vectors.dense(Array.empty[Double]),
       Vectors.dense(Array.empty[Double]),
       Vectors.dense(Array.empty[Double])
     )
-    check(rows)
+    checkDense(rows)
+    checkSparse(rows)
   }
 }
