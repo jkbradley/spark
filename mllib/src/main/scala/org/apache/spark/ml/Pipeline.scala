@@ -21,7 +21,7 @@ import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.Logging
 import org.apache.spark.annotation.AlphaComponent
-import org.apache.spark.ml.param.{Params, Param, ParamMap}
+import org.apache.spark.ml.param.{Param, ParamMap}
 import org.apache.spark.sql.{SchemaRDD, StructType}
 
 /**
@@ -163,14 +163,14 @@ class PipelineModel private[ml] (
 
   override def transform(dataset: SchemaRDD, paramMap: ParamMap): SchemaRDD = {
     // Precedence of ParamMaps: paramMap > this.paramMap > fittingParamMap
-    val map = (fittingParamMap ++ this.paramMap) ++ fittingParamMap
+    val map = (fittingParamMap ++ this.paramMap) ++ paramMap
     transformSchema(dataset.schema, map, logging = true)
     stages.foldLeft(dataset)((cur, transformer) => transformer.transform(cur, map))
   }
 
   private[ml] override def transformSchema(schema: StructType, paramMap: ParamMap): StructType = {
     // Precedence of ParamMaps: paramMap > this.paramMap > fittingParamMap
-    val map = (fittingParamMap ++ this.paramMap) ++ fittingParamMap
+    val map = (fittingParamMap ++ this.paramMap) ++ paramMap
     stages.foldLeft(schema)((cur, transformer) => transformer.transformSchema(cur, map))
   }
 }

@@ -250,8 +250,8 @@ JavaSparkContext jsc = new JavaSparkContext(conf);
 JavaSQLContext jsql = new JavaSQLContext(jsc);
 
 // Prepare training data.
-// We use LabeledPoint, which is a case class.  Spark SQL can convert RDDs of case classes
-// into SchemaRDDs, where it uses the case class metadata to infer the schema.
+// We use LabeledPoint, which is a JavaBean.  Spark SQL can convert RDDs of JavaBeans
+// into SchemaRDDs, where it uses the bean information to infer the schema.
 List<LabeledPoint> localTraining = Lists.newArrayList(
   new LabeledPoint(1.0, Vectors.dense(0.0, 1.1, 0.1)),
   new LabeledPoint(0.0, Vectors.dense(2.0, 1.0, -1.0)),
@@ -280,7 +280,7 @@ System.out.println("Model 1 was fit using parameters: " + model1.fittingParamMap
 ParamMap paramMap = new ParamMap();
 paramMap.put(lr.maxIter(), 20); // Specify 1 Param.
 paramMap.put(lr.maxIter(), 30); // This overwrites the original maxIter.
-paramMap.put(lr.regParam(), 0.1);
+paramMap.put(lr.regParam().w(0.1), lr.threshold().w(0.5)); // Specify multiple Params.
 
 // One can also combine ParamMaps.
 ParamMap paramMap2 = new ParamMap();
@@ -488,7 +488,7 @@ An important task in ML is *model selection*, or using data to find the best mod
 Currently, `spark.ml` supports model selection using the [`CrossValidator`](api/scala/index.html#org.apache.spark.ml.tuning.CrossValidator) class, which takes an `Estimator`, a set of `ParamMap`s, and an [`Evaluator`](api/scala/index.html#org.apache.spark.ml.Evaluator).
 `CrossValidator` begins by splitting the dataset into a set of *folds* which are used as separate training and test datasets; e.g., with `$k=3$` folds, `CrossValidator` will generate 3 (training, test) dataset pairs, each of which uses 2/3 of the data for training and 1/3 for testing.
 `CrossValidator` iterates through the set of `ParamMap`s. For each `ParamMap`, it trains the given `Estimator` and evaluates it using the given `Evaluator`.
-The `ParamMap` which produces the best evaluation metric (averaged over the `$k$` folds) is selected as the best model.
+The `ParamMap` which produces the best evaluation metric (averaged over the `$k$` folds) is selected as the best `ParamMap`.
 `CrossValidator` finally fits the `Estimator` using the best `ParamMap` and the entire dataset.
 
 The following example demonstrates using `CrossValidator` to select from a grid of parameters.
@@ -496,7 +496,7 @@ To help construct the parameter grid, we use the [`ParamGridBuilder`](api/scala/
 
 Note that cross-validation over a grid of parameters is expensive.
 E.g., in the example below, the parameter grid has 3 values for `hashingTF.numFeatures` and 2 values for `lr.regParam`, and `CrossValidator` uses 2 folds.  This multiplies out to `$(3 \times 2) \times 2 = 12$` different models being trained.
-In realistic settings, it can be common to try many more parameters and use more folds (`$k=3$` and `$k=10$` are common).
+In realistic settings, it can be common to try many more parameters and use more folds.
 In other words, using `CrossValidator` can be very expensive.
 However, it is also a well-established method for choosing parameters which is more statistically sound than heuristic hand-tuning.
 

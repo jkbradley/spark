@@ -77,7 +77,7 @@ public class JavaSimpleParamsExample {
     ParamMap paramMap = new ParamMap();
     paramMap.put(lr.maxIter(), 20); // Specify 1 Param.
     paramMap.put(lr.maxIter(), 30); // This overwrites the original maxIter.
-    paramMap.put(lr.regParam(), 0.1);
+    paramMap.put(lr.regParam().w(0.1), lr.threshold().w(0.5)); // Specify multiple Params.
 
     // One can also combine ParamMaps.
     ParamMap paramMap2 = new ParamMap();
