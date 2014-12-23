@@ -133,8 +133,8 @@ class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
   test("rowToColumnStore: large dense") {
     // Note: All values must be non-zero since rowToColumnStoreSparse() automatically ignores
     //       zero-valued elements.
-    var numRows = 100
-    var numCols = 90
+    val numRows = 100
+    val numCols = 90
     val rows = Range(0, numRows).map { i =>
       Vectors.dense(Range(0, numCols).map(_ + numCols * i + 1.0).toArray)
     }
