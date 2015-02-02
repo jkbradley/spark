@@ -75,7 +75,7 @@ class EdgeRDDImpl[ED: ClassTag, VD: ClassTag] private[graphx] (
   }
 
   override def isCheckpointed: Boolean = {
-    partitionsRDD.isCheckpointed
+    firstParent.isCheckpointed
   }
 
   override def getCheckpointFile: Option[String] = {
