@@ -19,6 +19,7 @@ package org.apache.spark.ml.tree
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.mllib.linalg.Vector
+import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
 import org.apache.spark.mllib.tree.model.{InformationGainStats => OldInformationGainStats,
   Node => OldNode, Predict => OldPredict}
 
@@ -39,7 +40,7 @@ sealed abstract class Node extends Serializable {
   def impurity: Double
 
   /** Recursive prediction helper method */
-  private[ml] def predict(features: Vector): Double = prediction
+  private[ml] def predictImpl(features: Vector): LeafNode
 
   /**
    * Get the number of nodes in tree below this node, including leaf nodes.
@@ -64,6 +65,14 @@ sealed abstract class Node extends Serializable {
    * @param id  Node ID using old format IDs
    */
   private[ml] def toOld(id: Int): OldNode
+
+  /**
+   * Statistics aggregated from training data at this node, used to compute prediction, impurity,
+   * and probabilities.
+   * For classification, the array of class counts must be normalized to a probability distribution.
+   */
+  private[tree] def impurityStats: ImpurityCalculator
+
 }
 
 private[ml] object Node {
@@ -75,7 +84,8 @@ private[ml] object Node {
     if (oldNode.isLeaf) {
       // TODO: Once the implementation has been moved to this API, then include sufficient
       //       statistics here.
-      new LeafNode(prediction = oldNode.predict.predict, impurity = oldNode.impurity)
+      new LeafNode(prediction = oldNode.predict.predict, impurity = oldNode.impurity,
+        impurityStats = null)
     } else {
       val gain = if (oldNode.stats.nonEmpty) {
         oldNode.stats.get.gain
@@ -85,7 +95,7 @@ private[ml] object Node {
       new InternalNode(prediction = oldNode.predict.predict, impurity = oldNode.impurity,
         gain = gain, leftChild = fromOld(oldNode.leftNode.get, categoricalFeatures),
         rightChild = fromOld(oldNode.rightNode.get, categoricalFeatures),
-        split = Split.fromOld(oldNode.split.get, categoricalFeatures))
+        split = Split.fromOld(oldNode.split.get, categoricalFeatures), impurityStats = null)
     }
   }
 }
@@ -95,15 +105,20 @@ private[ml] object Node {
  * Decision tree leaf node.
  * @param prediction  Prediction this node makes
  * @param impurity  Impurity measure at this node (for training data)
+ * @param impurityStats  Statistics aggregated from training data at this node, used to compute
+ *                       prediction, impurity, and probabilities.
+ *                       For classification, the array of class counts must be normalized to a
+ *                       probability distribution.
  */
 @DeveloperApi
 final class LeafNode private[ml] (
     override val prediction: Double,
-    override val impurity: Double) extends Node {
+    override val impurity: Double,
+    private[ml] val impurityStats: ImpurityCalculator) extends Node {
 
   override def toString: String = s"LeafNode(prediction = $prediction, impurity = $impurity)"
 
-  override private[ml] def predict(features: Vector): Double = prediction
+  override private[ml] def predictImpl(features: Vector): LeafNode = this
 
   override private[tree] def numDescendants: Int = 0
 
@@ -131,6 +146,10 @@ final class LeafNode private[ml] (
  * @param leftChild  Left-hand child node
  * @param rightChild  Right-hand child node
  * @param split  Information about the test used to split to the left or right child.
+ * @param impurityStats  Statistics aggregated from training data at this node, used to compute
+ *                       prediction, impurity, and probabilities.
+ *                       For classification, the array of class counts must be normalized to a
+ *                       probability distribution.
  */
 @DeveloperApi
 final class InternalNode private[ml] (
@@ -139,17 +158,18 @@ final class InternalNode private[ml] (
     val gain: Double,
     val leftChild: Node,
     val rightChild: Node,
-    val split: Split) extends Node {
+    val split: Split,
+    private[tree] val impurityStats: ImpurityCalculator) extends Node {
 
   override def toString: String = {
     s"InternalNode(prediction = $prediction, impurity = $impurity, split = $split)"
   }
 
-  override private[ml] def predict(features: Vector): Double = {
+  override private[ml] def predictImpl(features: Vector): LeafNode = {
     if (split.shouldGoLeft(features)) {
-      leftChild.predict(features)
+      leftChild.predictImpl(features)
     } else {
-      rightChild.predict(features)
+      rightChild.predictImpl(features)
     }
   }
 
@@ -240,7 +260,8 @@ private[tree] class LearningNode(
     var rightChild: Option[LearningNode],
     var split: Option[Split],
     var isLeaf: Boolean,
-    var stats: Option[OldInformationGainStats]) extends Serializable {
+    var stats: Option[OldInformationGainStats],
+    var impurityStats: Option[ImpurityCalculator]) extends Serializable {
 
   /**
    * Convert this [[LearningNode]] to a regular [[Node]], and recurse on any children.
@@ -250,9 +271,9 @@ private[tree] class LearningNode(
       assert(rightChild.nonEmpty && split.nonEmpty && stats.nonEmpty,
         "Unknown error during Decision Tree learning.  Could not convert LearningNode to Node.")
       new InternalNode(predictionStats.predict, impurity, stats.get.gain,
-        leftChild.get.toNode, rightChild.get.toNode, split.get)
+        leftChild.get.toNode, rightChild.get.toNode, split.get, impurityStats.orNull)
     } else {
-      new LeafNode(predictionStats.predict, impurity)
+      new LeafNode(predictionStats.predict, impurity, impurityStats.orNull)
     }
   }
 
@@ -266,13 +287,13 @@ private[tree] object LearningNode {
       predictionStats: OldPredict,
       impurity: Double,
       isLeaf: Boolean): LearningNode = {
-    new LearningNode(id, predictionStats, impurity, None, None, None, false, None)
+    new LearningNode(id, predictionStats, impurity, None, None, None, false, None, None)
   }
 
   /** Create an empty node with the given node index.  Values must be set later on. */
   def emptyNode(nodeIndex: Int): LearningNode = {
     new LearningNode(nodeIndex, new OldPredict(Double.NaN, Double.NaN), Double.NaN,
-      None, None, None, false, None)
+      None, None, None, false, None, None)
   }
 
   // The below indexing methods were copied from spark.mllib.tree.model.Node
