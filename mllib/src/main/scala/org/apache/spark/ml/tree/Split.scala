@@ -47,6 +47,12 @@ sealed trait Split extends Serializable {
    */
   private[tree] def shouldGoLeft(binnedFeature: Int, splits: Array[Split]): Boolean
 
+  /**
+   * Return true (split to left) or false (split to right).
+   * @param feature Feature value (original value, not binned)
+   */
+  private[tree] def shouldGoLeft(feature: Double): Boolean
+
   /** Convert to old Split format */
   private[tree] def toOld: OldSplit
 }
@@ -112,6 +118,14 @@ final class CategoricalSplit private[ml] (
     }
   }
 
+  override private[tree] def shouldGoLeft(feature: Double): Boolean = {
+    if (isLeft) {
+      categories.contains(feature)
+    } else {
+      !categories.contains(feature)
+    }
+  }
+
   override def equals(o: Any): Boolean = {
     o match {
       case other: CategoricalSplit => featureIndex == other.featureIndex &&
@@ -170,6 +184,10 @@ final class ContinuousSplit private[ml] (override val featureIndex: Int, val thr
       val featureValueUpperBound = splits(binnedFeature).asInstanceOf[ContinuousSplit].threshold
       featureValueUpperBound <= threshold
     }
+  }
+
+  override private[tree] def shouldGoLeft(feature: Double): Boolean = {
+    feature <= threshold
   }
 
   override def equals(o: Any): Boolean = {

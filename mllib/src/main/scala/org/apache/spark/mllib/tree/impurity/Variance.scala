@@ -97,23 +97,6 @@ private[tree] class VarianceAggregator()
 }
 
 /**
- * Version of Variance aggregator which owns its data and is only for one node.
- */
-private[tree] class VarianceAggregatorSingle
-  extends ImpurityAggregatorSingle(new Array[Double](3)) with Serializable {
-
-  def update(label: Double, instanceWeight: Double): this.type = {
-    stats(0) += instanceWeight
-    stats(1) += instanceWeight * label
-    stats(2) += instanceWeight * label * label
-    this
-  }
-
-  def getCalculator: VarianceCalculator = new VarianceCalculator(stats)
-
-}
-
-/**
  * Stores statistics for one (node, feature, bin) for calculating impurity.
  * Unlike [[GiniAggregator]], this class stores its own data and is for a specific
  * (node, feature, bin).

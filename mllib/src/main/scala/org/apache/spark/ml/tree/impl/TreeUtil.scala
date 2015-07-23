@@ -15,16 +15,15 @@
  * limitations under the License.
  */
 
-package org.apache.spark.mllib.tree.impl
+package org.apache.spark.ml.tree.impl
 
 import scala.collection.mutable.ArrayBuffer
 
-import org.apache.spark.SparkContext._
-import org.apache.spark.mllib.linalg.{SparseVector, DenseVector, Vectors, Vector}
+import org.apache.spark.mllib.linalg.{DenseVector, SparseVector, Vector, Vectors}
 import org.apache.spark.rdd.RDD
 
 
-private[tree] object Util {
+private[tree] object TreeUtil {
 
   /**
    * Convert a dataset of [[Vector]] from row storage to column storage.
@@ -61,7 +60,7 @@ private[tree] object Util {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
     val numCols = rowStore.take(1)(0).size
-    val numSourcePartitions = rowStore.partitions.size
+    val numSourcePartitions = rowStore.partitions.length
     val numTargetPartitions = Math.min(numCols, numSourcePartitions)
     if (numTargetPartitions == 0) {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
@@ -125,7 +124,7 @@ private[tree] object Util {
       iterator.foreach { case (sourcePartitionIndex, partCols) =>
         collectedPartCols(sourcePartitionIndex) = partCols
       }
-      val rowOffsets: Array[Int] = collectedPartCols.map(_(0).size).scanLeft(0)(_ + _)
+      val rowOffsets: Array[Int] = collectedPartCols.map(_(0).length).scanLeft(0)(_ + _)
       val numRows = rowOffsets.last
       // Initialize full columns
       val fromCol = groupIndex * maxColumnsPerPartition
@@ -161,7 +160,7 @@ private[tree] object Util {
    */
   private def countNonZerosPerColumn(rowStore: RDD[Vector]): Array[Long] = {
     val firstRow = rowStore.take(1)
-    if (firstRow.size == 0) {
+    if (firstRow.length == 0) {
       return Array.empty[Long]
     }
     val numCols = firstRow(0).size
@@ -176,7 +175,7 @@ private[tree] object Util {
           }
         case sv: SparseVector =>
           var k = 0
-          while (k < sv.indices.size) {
+          while (k < sv.indices.length) {
             if (sv.values(k) != 0.0) partColSizes(sv.indices(k)) += 1
             k += 1
           }
@@ -222,8 +221,8 @@ private[tree] object Util {
 
     // Compute the number of non-zeros in each column.
     val colSizes: Array[Long] = countNonZerosPerColumn(rowStore)
-    val numCols = colSizes.size
-    val numSourcePartitions = rowStore.partitions.size
+    val numCols = colSizes.length
+    val numSourcePartitions = rowStore.partitions.length
     if (numCols == 0 || numSourcePartitions == 0) {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
@@ -254,7 +253,7 @@ private[tree] object Util {
       startCols += numCols
       startCols.toArray
     }
-    val numGroups = groupStartColumns.size - 1 // actual number of destination partitions
+    val numGroups = groupStartColumns.length - 1 // actual number of destination partitions
 
     /* On each partition, re-organize into groups of columns:
          (groupIndex, (sourcePartitionIndex, partCols)),
@@ -303,7 +302,7 @@ private[tree] object Util {
              */
             var groupIndex = 0
             var k = 0 // index into SparseVector non-zeros
-            val nnz = sv.indices.size
+            val nnz = sv.indices.length
             while (groupIndex < numGroups && k < nnz) {
               val fromColumn = groupStartColumns(groupIndex)
               val groupEndColumn = groupStartColumns(groupIndex + 1)
@@ -347,7 +346,7 @@ private[tree] object Util {
       iterator.foreach { case (sourcePartitionIndex, partCols) =>
         collectedPartCols(sourcePartitionIndex) = partCols
         partCols.zipWithIndex.foreach { case (partCol, colIdx) =>
-          nzCounts(colIdx)(sourcePartitionIndex) += partCol.indices.size
+          nzCounts(colIdx)(sourcePartitionIndex) += partCol.indices.length
         }
       }
       // nzOffsets(colIdx)(sourcePartitionIndex) = cumulative number of non-zeros

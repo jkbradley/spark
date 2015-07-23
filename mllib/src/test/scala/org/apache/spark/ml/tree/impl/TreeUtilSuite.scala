@@ -15,18 +15,15 @@
  * limitations under the License.
  */
 
-package org.apache.spark.mllib.tree.impl
+package org.apache.spark.ml.tree.impl
 
 import scala.collection.mutable
 
-import org.scalatest.FunSuite
-
-import org.apache.spark.mllib.linalg.{SparseVector, DenseVector, Vector, Vectors}
-import org.apache.spark.mllib.tree.impl.Util._
-import org.apache.spark.mllib.util.MLlibTestSparkContext
+import org.apache.spark.ml.tree.impl.TreeUtil._
+import org.apache.spark.mllib.linalg.{SparseVector, Vector, Vectors}
 
 /**
- * Test suite for [[org.apache.spark.mllib.tree.impl.Util]].
+ * Test suite for [[TreeUtil]].
  */
 class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
 
