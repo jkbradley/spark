@@ -117,27 +117,6 @@ private[tree] class EntropyAggregator(numClasses: Int)
 }
 
 /**
- * Version of Entropy aggregator which owns its data and is only for one node.
- */
-private[tree] class EntropyAggregatorSingle private (stats: Array[Double])
-  extends ImpurityAggregatorSingle(stats) with Serializable {
-
-  def this(numClasses: Int) = this(new Array[Double](numClasses))
-
-  def update(label: Double, instanceWeight: Double): this.type = {
-    if (label >= statsSize) {
-      throw new IllegalArgumentException(s"EntropyAggregatorSingle given label $label" +
-        s" but requires label < numClasses (= $statsSize).")
-    }
-    stats(label.toInt) += instanceWeight
-    this
-  }
-
-  def getCalculator: EntropyCalculator = new EntropyCalculator(stats)
-
-}
-
-/**
  * Stores statistics for one (node, feature, bin) for calculating impurity.
  * Unlike [[EntropyAggregator]], this class stores its own data and is for a specific
  * (node, feature, bin).

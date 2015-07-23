@@ -179,6 +179,13 @@ private[ml] object RandomForest extends Logging {
       }
     }
 
+    topNodes.map(finalizeTree(_, strategy.algo, parentUID))
+  }
+
+  private[tree] def finalizeTree(
+      rootNode: Node,
+      algo: OldAlgo.Algo,
+      parentUID: Option[String]): DecisionTreeModel = {
     parentUID match {
       case Some(uid) =>
         if (strategy.algo == OldAlgo.Classification) {
@@ -186,7 +193,7 @@ private[ml] object RandomForest extends Logging {
             new DecisionTreeClassificationModel(uid, rootNode.toNode, strategy.getNumClasses)
           }
         } else {
-          topNodes.map(rootNode => new DecisionTreeRegressionModel(uid, rootNode.toNode))
+          new DecisionTreeRegressionModel(uid, rootNode)
         }
       case None =>
         if (strategy.algo == OldAlgo.Classification) {
@@ -194,7 +201,7 @@ private[ml] object RandomForest extends Logging {
             new DecisionTreeClassificationModel(rootNode.toNode, strategy.getNumClasses)
           }
         } else {
-          topNodes.map(rootNode => new DecisionTreeRegressionModel(rootNode.toNode))
+          new DecisionTreeRegressionModel(rootNode)
         }
     }
   }
