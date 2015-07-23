@@ -18,6 +18,7 @@
 package org.apache.spark.mllib.tree.impurity
 
 import org.apache.spark.annotation.{DeveloperApi, Experimental, Since}
+import org.apache.spark.mllib.tree.model.Predict
 
 /**
  * :: Experimental ::
@@ -93,6 +94,37 @@ private[spark] abstract class ImpurityAggregator(val statsSize: Int) extends Ser
 }
 
 /**
+ * Version of impurity aggregator which owns its data and is only for 1 node.
+ */
+private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
+  extends Serializable {
+
+  def statsSize: Int = stats.size
+
+  /**
+   * Merge two aggregators.
+   * @return This aggregator (modified).
+   */
+  def merge(other: ImpurityAggregatorSingle): this.type = {
+    var i = 0
+    while (i < statsSize) {
+      stats(i) += other.stats(i)
+      i += 1
+    }
+    this
+  }
+
+  /**
+   * Update stats with the given label.
+   * @return This aggregator (modified).
+   */
+  def update(label: Double, instanceWeight: Double): this.type
+
+  /** Get an [[ImpurityCalculator]] for the current stats. */
+  def getCalculator: ImpurityCalculator
+}
+
+/**
  * Stores statistics for one (node, feature, bin) for calculating impurity.
  * Unlike [[ImpurityAggregator]], this class stores its own data and is for a specific
  * (node, feature, bin).
@@ -157,6 +189,12 @@ private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) exten
    * Probability of the label given by [[predict]], or -1 if no probability is available.
    */
   def prob(label: Double): Double = -1
+
+  /** Get [[Predict]] struct. */
+  def getPredict = {
+    val pred = this.predict
+    new Predict(predict = pred, prob = this.prob(pred))
+  }
 
   /**
    * Return the index of the largest array element.

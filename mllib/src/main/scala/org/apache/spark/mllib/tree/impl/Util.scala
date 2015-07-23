@@ -159,7 +159,7 @@ private[tree] object Util {
    * @return  Array over columns of the number of non-zero elements in each column.
    *          Returns empty array if the RDD is empty.
    */
-  def countNonZerosPerColumn(rowStore: RDD[Vector]): Array[Long] = {
+  private def countNonZerosPerColumn(rowStore: RDD[Vector]): Array[Long] = {
     val firstRow = rowStore.take(1)
     if (firstRow.size == 0) {
       return Array.empty[Long]
@@ -194,6 +194,10 @@ private[tree] object Util {
    *     numTargetPartitions = min(rowStore num partitions, num columns) * overPartitionFactor.
    *  - The actual number will be in the range [numTargetPartitions, 2 * numTargetPartitions].
    * Partitioning is done such that each partition holds consecutive columns.
+   *
+   * TODO: Update this to adaptively make columns dense or sparse based on a sparsity threshold.
+   *
+   * TODO: Cache rowStore temporarily.
    *
    * @param rowStore  RDD of dataset rows
    * @param overPartitionFactor  Multiplier for the targeted number of partitions.  This parameter
