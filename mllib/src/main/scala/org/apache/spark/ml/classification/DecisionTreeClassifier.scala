@@ -18,9 +18,9 @@
 package org.apache.spark.ml.classification
 
 import org.apache.spark.annotation.{Experimental, Since}
-import org.apache.spark.ml.param.ParamMap
+import org.apache.spark.ml.param.{Param, ParamMap}
 import org.apache.spark.ml.tree.{DecisionTreeModel, DecisionTreeParams, Node, TreeClassifierParams}
-import org.apache.spark.ml.tree.impl.RandomForest
+import org.apache.spark.ml.tree.impl.{AltDT, RandomForest}
 import org.apache.spark.ml.util.{Identifiable, MetadataUtils}
 import org.apache.spark.mllib.linalg.{DenseVector, SparseVector, Vector, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
@@ -76,6 +76,25 @@ final class DecisionTreeClassifier @Since("1.4.0") (
   @Since("1.6.0")
   override def setSeed(value: Long): this.type = super.setSeed(value)
 
+  /**
+   * Algorithm used for learning.
+   * Supported: "byRow" or "byCol" (case sensitive).
+   * (default = "byRow")
+   * @group param
+   */
+  val algorithm: Param[String] = new Param[String](this, "algorithm", "Algorithm used " +
+    "for learning. Supported options:" +
+    s" ${DecisionTreeClassifier.supportedAlgorithms.mkString(", ")}",
+    (value: String) => DecisionTreeClassifier.supportedAlgorithms.contains(value))
+
+  setDefault(algorithm -> "byRow")
+
+  /** @group setParam */
+  def setAlgorithm(value: String): this.type = set(algorithm, value)
+
+  /** @group getParam */
+  def getAlgorithm: String = $(algorithm)
+
   override protected def train(dataset: DataFrame): DecisionTreeClassificationModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
@@ -88,9 +107,15 @@ final class DecisionTreeClassifier @Since("1.4.0") (
     }
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
     val strategy = getOldStrategy(categoricalFeatures, numClasses)
-    val trees = RandomForest.run(oldDataset, strategy, numTrees = 1, featureSubsetStrategy = "all",
-      seed = $(seed), parentUID = Some(uid))
-    trees.head.asInstanceOf[DecisionTreeClassificationModel]
+    val model = getAlgorithm match {
+      case "byRow" =>
+        val trees = RandomForest.run(oldDataset, strategy, numTrees = 1,
+          featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
+        trees.head
+      case "byCol" =>
+        AltDT.train(oldDataset, strategy, parentUID = Some(uid))
+    }
+    model.asInstanceOf[DecisionTreeClassificationModel]
   }
 
   /** (private[ml]) Create a Strategy instance to use with the old API. */
@@ -111,6 +136,8 @@ object DecisionTreeClassifier {
   /** Accessor for supported impurities: entropy, gini */
   @Since("1.4.0")
   final val supportedImpurities: Array[String] = TreeClassifierParams.supportedImpurities
+
+  final val supportedAlgorithms: Array[String] = Array("byRow", "byCol")
 }
 
 /**

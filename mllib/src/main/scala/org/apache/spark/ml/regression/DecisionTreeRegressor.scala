@@ -19,9 +19,9 @@ package org.apache.spark.ml.regression
 
 import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.{PredictionModel, Predictor}
-import org.apache.spark.ml.param.ParamMap
+import org.apache.spark.ml.param.{Param, ParamMap}
 import org.apache.spark.ml.tree.{DecisionTreeModel, DecisionTreeParams, Node, TreeRegressorParams}
-import org.apache.spark.ml.tree.impl.RandomForest
+import org.apache.spark.ml.tree.impl.{AltDT, RandomForest}
 import org.apache.spark.ml.util.{Identifiable, MetadataUtils}
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
@@ -73,14 +73,39 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
 
   override def setSeed(value: Long): this.type = super.setSeed(value)
 
+  /**
+   * Algorithm used for learning.
+   * Supported: "byRow" or "byCol" (case sensitive).
+   * (default = "byRow")
+   * @group param
+   */
+  val algorithm: Param[String] = new Param[String](this, "algorithm", "Algorithm used " +
+    "for learning. Supported options:" +
+    s" ${DecisionTreeRegressor.supportedAlgorithms.mkString(", ")}",
+    (value: String) => DecisionTreeRegressor.supportedAlgorithms.contains(value))
+
+  setDefault(algorithm -> "byRow")
+
+  /** @group setParam */
+  def setAlgorithm(value: String): this.type = set(algorithm, value)
+
+  /** @group getParam */
+  def getAlgorithm: String = $(algorithm)
+
   override protected def train(dataset: DataFrame): DecisionTreeRegressionModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
     val strategy = getOldStrategy(categoricalFeatures)
-    val trees = RandomForest.run(oldDataset, strategy, numTrees = 1, featureSubsetStrategy = "all",
-      seed = $(seed), parentUID = Some(uid))
-    trees.head.asInstanceOf[DecisionTreeRegressionModel]
+    val model = getAlgorithm match {
+      case "byRow" =>
+        val trees = RandomForest.run(oldDataset, strategy, numTrees = 1,
+          featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
+        trees.head
+      case "byCol" =>
+        AltDT.train(oldDataset, strategy, parentUID = Some(uid))
+    }
+    model.asInstanceOf[DecisionTreeRegressionModel]
   }
 
   /** (private[ml]) Create a Strategy instance to use with the old API. */
@@ -98,6 +123,8 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
 object DecisionTreeRegressor {
   /** Accessor for supported impurities: variance */
   final val supportedImpurities: Array[String] = TreeRegressorParams.supportedImpurities
+
+  final val supportedAlgorithms: Array[String] = Array("byRow", "byCol")
 }
 
 /**

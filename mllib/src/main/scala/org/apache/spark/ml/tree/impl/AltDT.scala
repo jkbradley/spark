@@ -20,7 +20,6 @@ package org.apache.spark.ml.tree.impl
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.Logging
-import org.apache.spark.annotation.Experimental
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.TreeUtil._
@@ -51,14 +50,9 @@ import org.apache.spark.util.collection.BitSet
  *
  * TODO: Update to use a sparse column store.
  */
-@Experimental
-class AltDT (private val strategy: Strategy) extends Serializable with Logging {
+object AltDT extends Logging {
 
-  import AltDT.{FeatureVector, PartitionInfo, bitSubvectorFromSplit}
-
-  strategy.assertValid()
-
-  private def getImpurityAggregator(): ImpurityAggregatorSingle = {
+  private def createImpurityAggregator(strategy: Strategy): ImpurityAggregatorSingle = {
     strategy.impurity match {
       case Entropy => new EntropyAggregatorSingle(strategy.numClasses)
       case Gini => new GiniAggregatorSingle(strategy.numClasses)
@@ -69,18 +63,21 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
   /**
    * Method to train a decision tree model over an RDD.
    */
-  def train(input: RDD[LabeledPoint], parentUID: Option[String] = None): DecisionTreeModel = {
+  def train(
+      input: RDD[LabeledPoint],
+      strategy: Strategy,
+      parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
-    val rootNode = trainImpl(input)
+    val rootNode = trainImpl(input, strategy)
     RandomForest.finalizeTree(rootNode, strategy.algo, parentUID)
   }
 
-  def trainImpl(input: RDD[LabeledPoint]): Node = {
+  def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
     // The case with 1 node (depth = 0) is handled separately.
     // This allows all iterations in the depth > 0 case to use the same code.
     if (strategy.maxDepth == 0) {
       val impurityAggregator: ImpurityAggregatorSingle =
-        input.aggregate(getImpurityAggregator())(
+        input.aggregate(createImpurityAggregator(strategy))(
           (agg, lp) => agg.update(lp.label, 1.0),
           (agg1, agg2) => agg1.add(agg2))
       val impurityCalculator = impurityAggregator.getCalculator
@@ -148,11 +145,13 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
           val localLabels = labelsBc.value
           // Iterate over the active nodes in the current level.
           activeNodes.iterator.map { nodeIndexInLevel: Int =>
+            println(s"nodeIndexInLevel=$nodeIndexInLevel, nodeOffsets.length=${nodeOffsets.length}")
             val fromOffset = nodeOffsets(nodeIndexInLevel)
             val toOffset = nodeOffsets(nodeIndexInLevel + 1)
             val splitsAndStats =
               columns.map { col =>
-                chooseSplit(col, localLabels, fromOffset, toOffset, getImpurityAggregator())
+                chooseSplit(col, localLabels, fromOffset, toOffset,
+                  createImpurityAggregator(strategy), strategy.minInfoGain)
               }
             // nodeIndexInLevel -> splitsAndStats.maxBy(_._2.gain)
             splitsAndStats.maxBy(_._2.gain)
@@ -178,6 +177,7 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
           val node = activeNodePeriphery(nodeIdx)
           node.predictionStats = new OldPredict(stats.prediction, -1)
           node.impurity = stats.impurity
+          println(s"nodeIdx: $nodeIdx, gain: ${stats.gain}")
           if (stats.gain > strategy.getMinInfoGain) {
             // TODO: Add prediction probability once that is added properly to trees
             node.leftChild =
@@ -192,9 +192,11 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
             Iterator()
           }
       }
+      println(s"activeNodePeriphery.length: ${activeNodePeriphery.length}")
       // We keep all old nodeOffsets and add one for each node split.
       // Each node split adds 2 nodes to activeNodePeriphery.
       numNodeOffsets = numNodeOffsets + activeNodePeriphery.length / 2
+      println(s"numNodeOffsets: $numNodeOffsets")
 
       // TODO: Check to make sure we split something, and stop otherwise.
       val doneLearning = currentLevel >= strategy.maxDepth
@@ -232,7 +234,7 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
         // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
         val aggBitVectorsBc = input.sparkContext.broadcast(aggBitVectors)
         partitionInfos = partitionInfos.map { partitionInfo =>
-          partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets, activeNodePeriphery.length)
+          partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
         }
         // TODO: unpersist aggBitVectorsBc after action.
       }
@@ -261,7 +263,8 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
       labels: Array[Double],
       fromOffset: Int,
       toOffset: Int,
-      impurityAgg: ImpurityAggregatorSingle): (Split, InfoGainStats) = {
+      impurityAgg: ImpurityAggregatorSingle,
+      minInfoGain: Double): (Split, InfoGainStats) = {
     val featureIndex = col.featureIndex
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
@@ -270,9 +273,9 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
     labels.foreach(fullImpurityAgg.update(_, 1.0))
     col.featureType match {
       case FeatureType.Categorical =>
-        chooseCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg, fullImpurityAgg)
+        chooseCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg, fullImpurityAgg, minInfoGain)
       case FeatureType.Continuous =>
-        chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg, fullImpurityAgg)
+        chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg, fullImpurityAgg, minInfoGain)
     }
   }
 
@@ -281,7 +284,8 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
       values: Seq[Double],
       labels: Seq[Double],
       leftImpurityAgg: ImpurityAggregatorSingle,
-      rightImpurityAgg: ImpurityAggregatorSingle): (Split, InfoGainStats) = ???
+      rightImpurityAgg: ImpurityAggregatorSingle,
+      minInfoGain: Double): (Split, InfoGainStats) = ???
 
   /**
    * Choose splitting rule: feature value <= threshold
@@ -291,31 +295,38 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
       values: Seq[Double],
       labels: Seq[Double],
       leftImpurityAgg: ImpurityAggregatorSingle,
-      rightImpurityAgg: ImpurityAggregatorSingle): (Split, InfoGainStats) = {
+      rightImpurityAgg: ImpurityAggregatorSingle,
+      minInfoGain: Double): (Split, InfoGainStats) = {
     val prediction = leftImpurityAgg.getCalculator.getPredict
 
     var bestThreshold: Double = Double.NegativeInfinity
     var bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
     var bestGain: Double = 0.0
     val fullImpurity = rightImpurityAgg.getCalculator.calculate()
-    var leftWeight: Double = 0.0
-    var rightWeight: Double = rightImpurityAgg.getWeight
+    var leftCount: Double = 0.0
+    var rightCount: Double = rightImpurityAgg.getCount
+    val fullCount: Double = rightCount
+    println(s"\nfeatureIndex: $featureIndex")
     values.zip(labels).foreach { case (value, label) =>
       // Move this instance from right to left side of split.
       leftImpurityAgg.update(label, 1.0)
       rightImpurityAgg.update(label, -1.0)
-      leftWeight += 1.0
-      rightWeight -= 1.0
+      leftCount += 1.0
+      rightCount -= 1.0
+      val leftWeight = leftCount / fullCount
+      val rightWeight = rightCount / fullCount
       // Check gain
       val leftImpurity = leftImpurityAgg.getCalculator.calculate()
       val rightImpurity = rightImpurityAgg.getCalculator.calculate()
       val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-      if (gain > bestGain) {
+      print(s" gain=$gain ")
+      if (gain > bestGain && gain > minInfoGain) {
         bestThreshold = value
         leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
         bestGain = gain
       }
     }
+    println()
 
     val leftImpurity = bestLeftImpurityAgg.getCalculator.calculate()
     val bestRightImpurityAgg =
@@ -323,13 +334,9 @@ class AltDT (private val strategy: Strategy) extends Serializable with Logging {
     val rightImpurity = bestRightImpurityAgg.getCalculator.calculate()
     val bestGainStats = new InfoGainStats(prediction.predict, bestGain, fullImpurity,
       leftImpurity, rightImpurity, bestLeftImpurityAgg.getCalculator.getPredict,
-    bestRightImpurityAgg.getCalculator.getPredict)
+      bestRightImpurityAgg.getCalculator.getPredict)
     (new ContinuousSplit(featureIndex, bestThreshold), bestGainStats)
   }
-
-}
-
-object AltDT extends Serializable with Logging {
 
   /**
    * Feature vector types are based on (feature type, representation).
@@ -382,8 +389,8 @@ object AltDT extends Serializable with Logging {
       fromOffset: Int,
       toOffset: Int,
       split: Split): BitSubvector = {
-    val nodeRowIndices = col.indices.view.slice(fromOffset, toOffset)
-    val nodeRowValues = col.values.view.slice(fromOffset, toOffset)
+    val nodeRowIndices = col.indices.view.slice(fromOffset, toOffset).toArray
+    val nodeRowValues = col.values.view.slice(fromOffset, toOffset).toArray
     val nodeRowValuesSortedByIndices = nodeRowIndices.zip(nodeRowValues).sortBy(_._1).map(_._2)
     val bitv = new BitSubvector(fromOffset, toOffset)
     nodeRowValuesSortedByIndices.zipWithIndex.foreach { case (value, i) =>
@@ -435,7 +442,7 @@ object AltDT extends Serializable with Logging {
      *                    For instances at inactive (leaf) nodes, the value can be arbitrary.
      * @return Updated partition info
      */
-    def update(bitVectors: Array[BitSubvector], newNumNodeOffsets: Int, numNewActiveNodes: Int): PartitionInfo = {
+    def update(bitVectors: Array[BitSubvector], newNumNodeOffsets: Int): PartitionInfo = {
       val newColumns = columns.map { oldCol =>
         val col = oldCol.deepCopy()
         var curBitVecIdx = 0
@@ -446,8 +453,9 @@ object AltDT extends Serializable with Logging {
           val curBitVector = bitVectors(curBitVecIdx)
           // Sort range [from, to) based on indices.  This is required to match the bit vector
           // across all workers.  See [[bitSubvectorFromSplit]] for details.
-          val sortedRange =
-            col.indices.view.slice(from, to).zip(col.values.view.slice(from, to)).sortBy(_._1)
+          val rangeIndices = col.indices.view.slice(from, to).toArray
+          val rangeValues = col.values.view.slice(from, to).toArray
+          val sortedRange = rangeIndices.zip(rangeValues).sortBy(_._1)
           // Sort range [from, to) based on bit vector.
           sortedRange.zipWithIndex.map { case ((idx, value), i) =>
             val bit = curBitVector.get(from + i)
@@ -479,8 +487,12 @@ object AltDT extends Serializable with Logging {
         }
       }
 
+      assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
+        s"newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
+          s" newNumNodeOffsets: $newNumNodeOffsets")
+
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
-      val newActiveNodes = new BitSet(newNumNodeOffsets)
+      val newActiveNodes = new BitSet(newNumNodeOffsets - 1)
       var newNodeOffsetsIdx = 0
       newNodeOffsets.foreach { offsets =>
         if (offsets.length == 2) {
