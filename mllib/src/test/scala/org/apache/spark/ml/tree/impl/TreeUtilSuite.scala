@@ -19,28 +19,30 @@ package org.apache.spark.ml.tree.impl
 
 import scala.collection.mutable
 
+import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.{SparseVector, Vector, Vectors}
+import org.apache.spark.mllib.util.MLlibTestSparkContext
 
 /**
  * Test suite for [[TreeUtil]].
  */
-class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
+class TreeUtilSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
   private def checkDense(rows: Seq[Vector]): Unit = {
     val numRowPartitions = 2
     val rowStore = sc.parallelize(rows, numRowPartitions)
     val colStore = rowToColumnStoreDense(rowStore)
-    val numColPartitions = colStore.partitions.size
+    val numColPartitions = colStore.partitions.length
     val cols: Map[Int, Vector] = colStore.collect().toMap
     val numRows = rows.size
     if (numRows == 0) {
-      assert(cols.size == 0)
+      assert(cols.isEmpty)
       return
     }
-    val numCols = rows(0).size
+    val numCols = rows.head.size
     if (numCols == 0) {
-      assert(cols.size == 0)
+      assert(cols.isEmpty)
       return
     }
     rows.zipWithIndex.foreach { case (row, i) =>
@@ -50,7 +52,7 @@ class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
         j += 1
       }
     }
-    val expectedNumColPartitions = math.min(rowStore.partitions.size, numCols)
+    val expectedNumColPartitions = math.min(rowStore.partitions.length, numCols)
     assert(numColPartitions === expectedNumColPartitions)
   }
 
@@ -59,17 +61,17 @@ class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
     val overPartitionFactor = 2
     val rowStore = sc.parallelize(rows, numRowPartitions)
     val colStore = rowToColumnStoreSparse(rowStore, overPartitionFactor)
-    val numColPartitions = colStore.partitions.size
+    val numColPartitions = colStore.partitions.length
     val cols: Map[Int, Vector] = colStore.collect().toMap
     val numRows = rows.size
     // Check cases with 0 rows or cols
     if (numRows == 0) {
-      assert(cols.size == 0)
+      assert(cols.isEmpty)
       return
     }
-    val numCols = rows(0).size
+    val numCols = rows.head.size
     if (numCols == 0) {
-      assert(cols.size == 0)
+      assert(cols.isEmpty)
       return
     }
     // Check values (and count non-zeros too)
@@ -84,7 +86,7 @@ class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
     }
     // Check sparsity
     val numNonZeros = cols.values.map {
-      case sv: SparseVector => sv.indices.size
+      case sv: SparseVector => sv.indices.length
       case _ => throw new RuntimeException(
         "checkSparse() found column which was not converted to SparseVector.")
     }.sum
@@ -98,7 +100,7 @@ class TreeUtilSuite extends FunSuite with MLlibTestSparkContext  {
     }.collect()
     colsByPartition.foreach { case (partitionIndex, partCols) =>
       var j = 0
-      while (j + 1 < partCols.size) {
+      while (j + 1 < partCols.length) {
         val curColIndex = partCols(j)._1
         val nextColIndex = partCols(j + 1)._1
         assert(curColIndex + 1 == nextColIndex)
