@@ -60,6 +60,7 @@ object DecisionTreeExample {
       testInput: String = "",
       dataFormat: String = "libsvm",
       algo: String = "Classification",
+      algorithm: String = "byRow",
       maxDepth: Int = 5,
       maxBins: Int = 32,
       minInstancesPerNode: Int = 1,
@@ -77,6 +78,9 @@ object DecisionTreeExample {
       opt[String]("algo")
         .text(s"algorithm (classification, regression), default: ${defaultParams.algo}")
         .action((x, c) => c.copy(algo = x))
+      opt[String]("algorithm")
+        .text(s"algorithm (byRow, byCol), default: ${defaultParams.algo}")
+        .action((x, c) => c.copy(algorithm = x))
       opt[Int]("maxDepth")
         .text(s"max depth of the tree, default: ${defaultParams.maxDepth}")
         .action((x, c) => c.copy(maxDepth = x))
@@ -236,16 +240,18 @@ object DecisionTreeExample {
     }
     // (2) Identify categorical features using VectorIndexer.
     //     Features with more than maxCategories values will be treated as continuous.
+    /*
     val featuresIndexer = new VectorIndexer()
       .setInputCol("features")
       .setOutputCol("indexedFeatures")
       .setMaxCategories(10)
     stages += featuresIndexer
+    */
     // (3) Learn Decision Tree
     val dt = algo match {
       case "classification" =>
         new DecisionTreeClassifier()
-          .setFeaturesCol("indexedFeatures")
+          .setFeaturesCol("features") // indexedFeatures
           .setLabelCol(labelColName)
           .setMaxDepth(params.maxDepth)
           .setMaxBins(params.maxBins)
@@ -253,9 +259,10 @@ object DecisionTreeExample {
           .setMinInfoGain(params.minInfoGain)
           .setCacheNodeIds(params.cacheNodeIds)
           .setCheckpointInterval(params.checkpointInterval)
+          .setAlgorithm(params.algorithm)
       case "regression" =>
         new DecisionTreeRegressor()
-          .setFeaturesCol("indexedFeatures")
+          .setFeaturesCol("features") // indexedFeatures
           .setLabelCol(labelColName)
           .setMaxDepth(params.maxDepth)
           .setMaxBins(params.maxBins)
@@ -263,6 +270,7 @@ object DecisionTreeExample {
           .setMinInfoGain(params.minInfoGain)
           .setCacheNodeIds(params.cacheNodeIds)
           .setCheckpointInterval(params.checkpointInterval)
+          .setAlgorithm(params.algorithm)
       case _ => throw new IllegalArgumentException("Algo ${params.algo} not supported.")
     }
     stages += dt

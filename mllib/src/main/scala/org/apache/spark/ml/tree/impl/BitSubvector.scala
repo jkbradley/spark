@@ -22,7 +22,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.util.collection.BitSet
 
 
-private class BitSubvector(val from: Int, val to: Int) extends Serializable {
+private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializable {
 
   val numBits: Int = to - from
 
@@ -43,7 +43,7 @@ private class BitSubvector(val from: Int, val to: Int) extends Serializable {
   }
 }
 
-private object BitSubvector {
+private[impl] object BitSubvector {
 
   def merge(parts1: Array[BitSubvector], parts2: Array[BitSubvector]): Array[BitSubvector] = {
     // Merge sorted parts1, parts2

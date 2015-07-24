@@ -65,8 +65,8 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
 
   def deepCopy(): ImpurityAggregatorSingle
 
-  /** Total weight of instances in this aggregator */
-  def getWeight: Double
+  /** Total (weighted) count of instances in this aggregator */
+  def getCount: Double
 
   /** Resets this aggregator as though nothing has been added to it. */
   def clear(): this.type = {
@@ -100,7 +100,7 @@ private[tree] class EntropyAggregatorSingle private (stats: Array[Double])
 
   override def deepCopy(): ImpurityAggregatorSingle = new EntropyAggregatorSingle(stats.clone())
 
-  override def getWeight: Double = stats.sum
+  override def getCount: Double = stats.sum
 }
 
 /**
@@ -124,7 +124,7 @@ private[tree] class GiniAggregatorSingle private (stats: Array[Double])
 
   override def deepCopy(): ImpurityAggregatorSingle = new GiniAggregatorSingle(stats.clone())
 
-  override def getWeight: Double = stats.sum
+  override def getCount: Double = stats.sum
 }
 
 /**
@@ -148,5 +148,5 @@ private[tree] class VarianceAggregatorSingle
     tmp
   }
 
-  override def getWeight: Double = stats(0)
+  override def getCount: Double = stats(0)
 }

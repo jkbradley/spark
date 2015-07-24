@@ -179,7 +179,7 @@ private[ml] object RandomForest extends Logging {
       }
     }
 
-    topNodes.map(finalizeTree(_, strategy.algo, parentUID))
+    topNodes.map(lNode => finalizeTree(lNode.toNode, strategy.algo, parentUID))
   }
 
   private[tree] def finalizeTree(
