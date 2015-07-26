@@ -62,4 +62,8 @@ class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
       assert(x.iterator.toSet === y.iterator.toSet)
     }
   }
+
+  test("BitSubvector merge with empty BitSubvectors") {
+    val parts = BitSubvector.merge(Array.empty[BitSubvector], Array.empty[BitSubvector])
+  }
 }

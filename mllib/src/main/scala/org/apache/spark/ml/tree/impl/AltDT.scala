@@ -52,6 +52,9 @@ import org.apache.spark.util.collection.BitSet
  */
 private[ml] object AltDT extends Logging {
 
+  private def myPrint(s: String = ""): Unit = print(s)
+  private def myPrintln(s: String = ""): Unit = println(s)
+
   private[impl] def createImpurityAggregator(strategy: Strategy): ImpurityAggregatorSingle = {
     strategy.impurity match {
       case Entropy => new EntropyAggregatorSingle(strategy.numClasses)
@@ -90,7 +93,7 @@ private[ml] object AltDT extends Logging {
     //       Or is the mapping implicit (i.e., not costly)?
     val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features))
     val numRows: Int = colStoreInit.first()._2.size
-    println(s"numRows = $numRows")
+    myPrintln(s"(D) numRows = $numRows")
     val labels = new Array[Double](numRows)
     input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
       labels(rowIndex.toInt) = label
@@ -108,15 +111,16 @@ private[ml] object AltDT extends Logging {
         FeatureVector.fromOriginal(featureIndex, FeatureType.Continuous, col)
       }
     }
+    myPrintln(s"colStore.numPartitions: ${colStore.partitions.length}")
     // Group columns together into one array of columns per partition.
     val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions { iterator =>
       val groupedCols = new ArrayBuffer[FeatureVector]
       iterator.foreach(groupedCols += _)
-      Iterator(groupedCols.toArray)
+      if (groupedCols.nonEmpty) Iterator(groupedCols.toArray) else Iterator()
     }
     groupedColStore.repartition(1).persist(StorageLevel.MEMORY_AND_DISK) // TODO: remove repartition
 
-    // Initialize partitions with 1 partition (i.e., each instance at the root node).
+    // Initialize partitions with 1 node (each instance at the root node).
     var partitionInfosA: RDD[PartitionInfo] = groupedColStore.map { groupedCols =>
       val initActive = new BitSet(1)
       initActive.setUntil(1)
@@ -135,36 +139,44 @@ private[ml] object AltDT extends Logging {
 
     // Iteratively learn, one level of the tree at a time.
     var currentLevel = 0
-    while (currentLevel < strategy.maxDepth) {
-      println(s"CURRENT LEVEL: $currentLevel")
-      Thread.sleep(10000)
+    var doneLearning = false
+    while (currentLevel < strategy.maxDepth && !doneLearning) {
+      myPrintln("\n========================================\n")
+      myPrintln(s"(D) CURRENT LEVEL: $currentLevel")
 
       val partitionInfos = partitionInfosDebug.last
-      println(s"A: First partitionInfos' nodeOffsets: ${partitionInfos.first().nodeOffsets.mkString("(",",",")")}")
+      myPrintln(s"(D) A: Current partitionInfos:\n")
+      partitionInfos.collect().foreach(x => myPrintln(x.toString))
+      myPrintln()
 
       // Compute best split for each active node.
       val bestSplitsAndGains: Array[(Split, InfoGainStats)] =
         computeBestSplits(partitionInfos, labelsBc, strategy)
-      assert(activeNodePeriphery.length == bestSplitsAndGains.length)
+      assert(activeNodePeriphery.length == bestSplitsAndGains.length,
+        s"activeNodePeriphery.length=${activeNodePeriphery.length} does not equal" +
+          s" bestSplitsAndGains.length=${bestSplitsAndGains.length}")
 
       // Update current model and node periphery.
       // Note: This flatMap has side effects (on the model).
       activeNodePeriphery =
         computeActiveNodePeriphery(activeNodePeriphery, bestSplitsAndGains, strategy.getMinInfoGain)
-      println(s"activeNodePeriphery.length: ${activeNodePeriphery.length}")
+      myPrintln(s"(D) activeNodePeriphery.length: ${activeNodePeriphery.length}")
       // We keep all old nodeOffsets and add one for each node split.
       // Each node split adds 2 nodes to activeNodePeriphery.
       numNodeOffsets = numNodeOffsets + activeNodePeriphery.length / 2
-      println(s"numNodeOffsets: $numNodeOffsets")
+      myPrintln(s"(D) numNodeOffsets: $numNodeOffsets")
+
+      // Filter active node periphery by impurity.
+      activeNodePeriphery = activeNodePeriphery.filter(_.impurity > 0.0)
 
       // TODO: Check to make sure we split something, and stop otherwise.
-      val doneLearning = currentLevel + 1 >= strategy.maxDepth
+      doneLearning = currentLevel + 1 >= strategy.maxDepth || activeNodePeriphery.length == 0
 
       if (!doneLearning) {
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right.
         val aggBitVectors: Array[BitSubvector] = collectBitVectors(partitionInfos, bestSplitsAndGains)
 
-        println(s"B: First partitionInfos' nodeOffsets: ${partitionInfos.first().nodeOffsets.mkString("(",",",")")}")
+        myPrintln(s"(D) B: First partitionInfos' nodeOffsets: ${partitionInfos.first().nodeOffsets.mkString("(",",",")")}")
 
         // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
         val aggBitVectorsBc = input.sparkContext.broadcast(aggBitVectors)
@@ -172,9 +184,10 @@ private[ml] object AltDT extends Logging {
         val partitionInfosB = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
         }
+        partitionInfosB.cache().count() // TODO: remove
         partitionInfosDebug.append(partitionInfosB)
 
-        println(s"C: First partitionInfos' nodeOffsets: ${partitionInfosB.first().nodeOffsets.mkString("(",",",")")}")
+        myPrintln(s"(D) C: First partitionInfos' nodeOffsets: ${partitionInfosB.first().nodeOffsets.mkString("(",",",")")}")
         // TODO: unpersist aggBitVectorsBc after action.
       }
 
@@ -211,10 +224,11 @@ private[ml] object AltDT extends Logging {
     //   for each active node, best split + info gain
     val partBestSplitsAndGains: RDD[Array[(Split, InfoGainStats)]] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int], activeNodes: BitSet) =>
+        myPrintln(s"(W) computeBestSplits(): activeNodes=${activeNodes.iterator.mkString(",")}")
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
         activeNodes.iterator.map { nodeIndexInLevel: Int =>
-          println(s"nodeIndexInLevel=$nodeIndexInLevel, nodeOffsets.length=${nodeOffsets.length}")
+          myPrintln(s"\t ~~> nodeIndexInLevel=$nodeIndexInLevel, nodeOffsets.length=${nodeOffsets.length}")
           val fromOffset = nodeOffsets(nodeIndexInLevel)
           val toOffset = nodeOffsets(nodeIndexInLevel + 1)
           val splitsAndStats =
@@ -222,7 +236,7 @@ private[ml] object AltDT extends Logging {
               chooseSplit(col, localLabels, fromOffset, toOffset,
                 createImpurityAggregator(strategy), strategy.minInfoGain)
             }
-          // nodeIndexInLevel -> splitsAndStats.maxBy(_._2.gain)
+          // We use Iterator and flatMap to handle empty partitions.
           splitsAndStats.maxBy(_._2.gain)
         }.toArray
     }
@@ -240,6 +254,13 @@ private[ml] object AltDT extends Logging {
     }
   }
 
+  /**
+   *
+   * @param oldPeriphery
+   * @param bestSplitsAndGains
+   * @param minInfoGain
+   * @return
+   */
   private[impl] def computeActiveNodePeriphery(
       oldPeriphery: Array[LearningNode],
       bestSplitsAndGains: Array[(Split, InfoGainStats)],
@@ -249,7 +270,7 @@ private[ml] object AltDT extends Logging {
         val node = oldPeriphery(nodeIdx)
         node.predictionStats = new OldPredict(stats.prediction, -1)
         node.impurity = stats.impurity
-        println(s"nodeIdx: $nodeIdx, gain: ${stats.gain}")
+        myPrintln(s"(D) nodeIdx: $nodeIdx, gain: ${stats.gain}")
         if (stats.gain > minInfoGain) {
           // TODO: Add prediction probability once that is added properly to trees
           node.leftChild =
@@ -258,7 +279,7 @@ private[ml] object AltDT extends Logging {
             Some(LearningNode(node.id * 2 + 1, stats.rightPredict, stats.rightImpurity, isLeaf = false)) // TODO: remove node id
           node.split = Some(split)
           node.stats = Some(stats.toOld)
-          println(s"DRIVER splitting node id=${node.id}: nodeIdx=$nodeIdx, gain=${stats.gain}")
+          myPrintln(s"(D) DRIVER splitting node id=${node.id}: nodeIdx=$nodeIdx, gain=${stats.gain}")
           Iterator(node.leftChild.get, node.rightChild.get)
         } else {
           node.isLeaf = true
@@ -296,6 +317,7 @@ private[ml] object AltDT extends Logging {
               val fromOffset = nodeOffsets(nodeIndexInLevel)
               val toOffset = nodeOffsets(nodeIndexInLevel + 1)
               val colIndex: Int = localFeatureIndex(split.featureIndex)
+              myPrintln(s"(W) collectBitVectors(): fromOffset=$fromOffset, toOffset=$toOffset, colIndex=$colIndex, nodeIndexInLevel=$nodeIndexInLevel")
               Iterator(bitSubvectorFromSplit(columns(colIndex), fromOffset, toOffset, split))
             } else {
               Iterator()
@@ -325,9 +347,12 @@ private[ml] object AltDT extends Logging {
     val featureIndex = col.featureIndex
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
+    myPrintln(s"(W) chooseSplit: feature=${col.featureIndex}, vals=${valuesForNode.mkString("(",",",")")}," +
+      s" labels=${labelsForNode.mkString("(",",",")")}," +
+      s" inds=${col.indices.view.slice(fromOffset, toOffset).mkString("(",",",")")}")
     impurityAgg.clear()
     val fullImpurityAgg = impurityAgg.deepCopy()
-    labels.foreach(fullImpurityAgg.update(_, 1.0))
+    labelsForNode.foreach(fullImpurityAgg.update(_, 1.0))
     col.featureType match {
       case FeatureType.Categorical =>
         chooseCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
@@ -365,27 +390,33 @@ private[ml] object AltDT extends Logging {
     var leftCount: Double = 0.0
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
-    println(s"\nfeatureIndex: $featureIndex")
+    myPrintln(s"(W) chooseContinuousSplit(): featureIndex=$featureIndex, values=${values.mkString(",")}")
+    var currentThreshold = values.headOption.getOrElse(bestThreshold)
     values.zip(labels).foreach { case (value, label) =>
+      if (value != currentThreshold) {
+        // Check gain
+        val leftWeight = leftCount / fullCount
+        val rightWeight = rightCount / fullCount
+        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
+        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
+        myPrintln(s"\t --> gain=$gain, fullImpurity=$fullImpurity, leftWeight=$leftWeight," +
+          s" leftImpurity=$leftImpurity, rightWeight=$rightWeight, rightImpurity=$rightImpurity")
+        if (gain > bestGain && gain > minInfoGain) {
+          bestThreshold = currentThreshold
+          leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+          bestGain = gain
+          myPrintln(s"\t  -> best update: bestThreshold=$bestThreshold, bestGain=$bestGain")
+        }
+        currentThreshold = value
+      }
       // Move this instance from right to left side of split.
       leftImpurityAgg.update(label, 1.0)
       rightImpurityAgg.update(label, -1.0)
       leftCount += 1.0
       rightCount -= 1.0
-      val leftWeight = leftCount / fullCount
-      val rightWeight = rightCount / fullCount
-      // Check gain
-      val leftImpurity = leftImpurityAgg.getCalculator.calculate()
-      val rightImpurity = rightImpurityAgg.getCalculator.calculate()
-      val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-      print(s" gain=$gain ")
-      if (gain > bestGain && gain > minInfoGain) {
-        bestThreshold = value
-        leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
-        bestGain = gain
-      }
     }
-    println()
+    myPrintln()
 
     val leftImpurity = bestLeftImpurityAgg.getCalculator.calculate()
     val bestRightImpurityAgg =
@@ -412,6 +443,16 @@ private[ml] object AltDT extends Logging {
       val values: Array[Double],
       val indices: Array[Int])
     extends Serializable {
+
+    /** For debugging */
+    override def toString: String = {
+      "  FeatureVector(" +
+        s"    featureIndex: $featureIndex,\n" +
+        s"    featureType: $featureType,\n" +
+        s"    values: ${values.mkString(", ")},\n" +
+        s"    indices: ${indices.mkString(", ")},\n" +
+        "  )"
+    }
 
     def deepCopy(): FeatureVector =
       new FeatureVector(featureIndex, featureType, values.clone(), indices.clone())
@@ -461,9 +502,17 @@ private[ml] object AltDT extends Logging {
     val nodeRowValues = col.values.view.slice(fromOffset, toOffset).toArray
     val nodeRowValuesSortedByIndices = nodeRowIndices.zip(nodeRowValues).sortBy(_._1).map(_._2)
     val bitv = new BitSubvector(fromOffset, toOffset)
+    myPrint(s"(W)   bitSubvectorFromSplit(): nodeRowIndices=${nodeRowIndices.mkString("(",",",")")}," +
+      s" nodeRowValues=${nodeRowValues.mkString("(",",",")")}")
     nodeRowValuesSortedByIndices.zipWithIndex.foreach { case (value, i) =>
-      if (!split.shouldGoLeft(value)) bitv.set(fromOffset + i)
+      if (!split.shouldGoLeft(value)) {
+        bitv.set(fromOffset + i)
+        myPrint("R ")
+      } else {
+        myPrint("L ")
+      }
     }
+    myPrintln()
     bitv
   }
 
@@ -493,6 +542,17 @@ private[ml] object AltDT extends Logging {
       activeNodes: BitSet)
     extends Serializable {
 
+    /** For debugging */
+    override def toString: String = {
+      "PartitionInfo(" +
+        "  columns: {\n" +
+        columns.mkString(",\n") +
+        "  },\n" +
+        s"  nodeOffsets: ${nodeOffsets.mkString(", ")},\n" +
+        s"  activeNodes: ${activeNodes.iterator.mkString(", ")},\n" +
+        ")\n"
+    }
+
     /**
      * Update columns and nodeOffsets for the next level of the tree.
      *
@@ -517,6 +577,7 @@ private[ml] object AltDT extends Logging {
         activeNodes.iterator.foreach { nodeIdx =>
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
+          // Note: Each node is guaranteed to be covered within 1 bit vector.
           if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
           val curBitVector = bitVectors(curBitVecIdx)
           // Sort range [from, to) based on indices.  This is required to match the bit vector
@@ -538,7 +599,7 @@ private[ml] object AltDT extends Logging {
       }
 
       // Create a 2-level representation of the new nodeOffsets (to be flattened).
-      println(s"initial nodeOffsets: ${nodeOffsets.mkString("(",",",")")}")
+      myPrintln(s"(W) initial nodeOffsets: ${nodeOffsets.mkString("(",",",")")}")
       val newNodeOffsets = nodeOffsets.map(Array(_))
       var curBitVecIdx = 0
       activeNodes.iterator.foreach { nodeIdx =>
@@ -546,20 +607,23 @@ private[ml] object AltDT extends Logging {
         val to = nodeOffsets(nodeIdx + 1)
         if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
         val curBitVector = bitVectors(curBitVecIdx)
+        assert(curBitVector.from <= from && to <= curBitVector.to)
         // Count number of values splitting to left vs. right
         val numRight = Range(from, to).count(curBitVector.get)
         val numLeft = to - from - numRight
         if (numLeft != 0 && numRight != 0) {
           // node is split
           val oldOffset = newNodeOffsets(nodeIdx).head
-          println(s"WORKER splitting node: nodeIdx=$nodeIdx, oldOffset=$oldOffset, numLeft=$numLeft")
+          myPrintln(s"(W) WORKER splitting node: nodeIdx=$nodeIdx, oldOffset=$oldOffset, numLeft=$numLeft, numRight=$numRight")
           newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
+        } else {
+          myPrintln(s"(W) WORKER NOT splitting node: nodeIdx=$nodeIdx, oldOffset=${newNodeOffsets(nodeIdx).head}, numLeft=$numLeft, numRight=$numRight")
         }
       }
 
-      println(s"newNodeOffsets: ${newNodeOffsets.map(_.mkString("(",",",")")).mkString("[", ", ", "]")}")
+      myPrintln(s"(W) newNodeOffsets: ${newNodeOffsets.map(_.mkString("(",",",")")).mkString("[", ", ", "]")}")
       assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
-        s"newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
+        s"(W) newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
           s" newNumNodeOffsets: $newNumNodeOffsets")
 
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
@@ -575,7 +639,7 @@ private[ml] object AltDT extends Logging {
         }
       }
 
-      new PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
+      PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
     }
   }
 

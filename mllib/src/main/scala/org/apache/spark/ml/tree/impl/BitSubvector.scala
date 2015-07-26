@@ -48,30 +48,34 @@ private[impl] object BitSubvector {
   def merge(parts1: Array[BitSubvector], parts2: Array[BitSubvector]): Array[BitSubvector] = {
     // Merge sorted parts1, parts2
     val sortedSubvectors = (parts1 ++ parts2).sortBy(_.from)
-    // Merge adjacent PartialBitVectors (for adjacent node ranges)
-    val newSubvectorRanges: Array[(Int, Int)] = {
-      val newSubvRanges = ArrayBuffer.empty[(Int, Int)]
-      var i = 1
-      var currentFrom = sortedSubvectors.head.from
-      while (i < sortedSubvectors.length) {
-        if (sortedSubvectors(i - 1).to != sortedSubvectors(i).from) {
-          newSubvRanges.append((currentFrom, sortedSubvectors(i - 1).to))
-          currentFrom = sortedSubvectors(i).from
+    if (sortedSubvectors.nonEmpty) {
+      // Merge adjacent PartialBitVectors (for adjacent node ranges)
+      val newSubvectorRanges: Array[(Int, Int)] = {
+        val newSubvRanges = ArrayBuffer.empty[(Int, Int)]
+        var i = 1
+        var currentFrom = sortedSubvectors.head.from
+        while (i < sortedSubvectors.length) {
+          if (sortedSubvectors(i - 1).to != sortedSubvectors(i).from) {
+            newSubvRanges.append((currentFrom, sortedSubvectors(i - 1).to))
+            currentFrom = sortedSubvectors(i).from
+          }
+          i += 1
         }
-        i += 1
+        newSubvRanges.append((currentFrom, sortedSubvectors.last.to))
+        newSubvRanges.toArray
       }
-      newSubvRanges.append((currentFrom, sortedSubvectors.last.to))
-      newSubvRanges.toArray
+      val newSubvectors = newSubvectorRanges.map { case (from, to) => new BitSubvector(from, to) }
+      var curNewSubvIdx = 0
+      sortedSubvectors.foreach { subv =>
+        if (subv.to > newSubvectors(curNewSubvIdx).to) curNewSubvIdx += 1
+        val newSubv = newSubvectors(curNewSubvIdx)
+        // TODO: More efficient (word-level) copy.
+        subv.iterator.foreach(idx => newSubv.set(idx))
+      }
+      assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check
+      newSubvectors
+    } else {
+      Array.empty[BitSubvector]
     }
-    val newSubvectors = newSubvectorRanges.map { case (from, to) => new BitSubvector(from, to) }
-    var curNewSubvIdx = 0
-    sortedSubvectors.foreach { subv =>
-      if (subv.to > newSubvectors(curNewSubvIdx).to) curNewSubvIdx += 1
-      val newSubv = newSubvectors(curNewSubvIdx)
-      // TODO: More efficient (word-level) copy.
-      subv.iterator.foreach(idx => newSubv.set(idx))
-    }
-    assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check
-    newSubvectors
   }
 }
