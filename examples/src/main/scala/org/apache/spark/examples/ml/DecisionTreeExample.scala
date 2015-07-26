@@ -286,14 +286,14 @@ object DecisionTreeExample {
     algo match {
       case "classification" =>
         val treeModel = pipelineModel.stages.last.asInstanceOf[DecisionTreeClassificationModel]
-        if (treeModel.numNodes < 20) {
+        if (treeModel.numNodes < 200) {
           println(treeModel.toDebugString) // Print full model.
         } else {
           println(treeModel) // Print model summary.
         }
       case "regression" =>
         val treeModel = pipelineModel.stages.last.asInstanceOf[DecisionTreeRegressionModel]
-        if (treeModel.numNodes < 20) {
+        if (treeModel.numNodes < 200) {
           println(treeModel.toDebugString) // Print full model.
         } else {
           println(treeModel) // Print model summary.

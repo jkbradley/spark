@@ -18,10 +18,12 @@
 package org.apache.spark.ml.tree.impl
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.ml.tree.ContinuousSplit
+import org.apache.spark.ml.regression.DecisionTreeRegressor
+import org.apache.spark.ml.tree.{LeafNode, InternalNode, ContinuousSplit}
 import org.apache.spark.ml.tree.impl.AltDT.{FeatureVector, PartitionInfo}
 import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.{SparseVector, Vector, Vectors}
+import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.FeatureType
 import org.apache.spark.mllib.tree.model.Predict
 import org.apache.spark.mllib.util.MLlibTestSparkContext
@@ -31,6 +33,42 @@ import org.apache.spark.util.collection.BitSet
  * Test suite for [[AltDT]].
  */
 class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
+
+  test("run deep example") {
+    val data = Range(0, 3).map(x => LabeledPoint(math.pow(x, 3), Vectors.dense(x)))
+    val df = sqlContext.createDataFrame(data)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features") // indexedFeatures
+      .setLabelCol("label")
+      .setMaxDepth(10)
+      .setAlgorithm("byCol")
+    val model = dt.fit(df)
+    println(model.toDebugString) // TODO: remove println
+    assert(model.rootNode.isInstanceOf[InternalNode])
+    val root = model.rootNode.asInstanceOf[InternalNode]
+    assert(root.leftChild.isInstanceOf[LeafNode] && root.rightChild.isInstanceOf[InternalNode])
+    val right = root.rightChild.asInstanceOf[InternalNode]
+    assert(right.leftChild.isInstanceOf[InternalNode], right.rightChild.isInstanceOf[InternalNode])
+  }
+
+  test("run example") {
+    val data = Range(0, 8).map(x => LabeledPoint(x, Vectors.dense(x)))
+    val df = sqlContext.createDataFrame(data)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features") // indexedFeatures
+      .setLabelCol("label")
+      .setMaxDepth(10)
+      .setAlgorithm("byCol")
+    val model = dt.fit(df)
+    println(model.toDebugString) // TODO: remove println
+    assert(model.rootNode.isInstanceOf[InternalNode])
+    val root = model.rootNode.asInstanceOf[InternalNode]
+    assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[InternalNode])
+    val left = root.leftChild.asInstanceOf[InternalNode]
+    val right = root.rightChild.asInstanceOf[InternalNode]
+    val grandkids = Array(left.leftChild, left.rightChild, right.leftChild, right.rightChild)
+    assert(grandkids.forall(_.isInstanceOf[InternalNode]))
+  }
 
   test("FeatureVector") {
     val v = new FeatureVector(1, FeatureType.Continuous, Array(0.1, 0.3, 0.7), Array(1, 2, 0))
@@ -95,6 +133,39 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(newInfo2.activeNodes.iterator.toSet === Set(0, 1, 2, 3))
   }
 
+  test("bitSubvectorFromSplit: 1 node") {
+    val col =
+      FeatureVector.fromOriginal(0, FeatureType.Continuous, Vectors.dense(0.1, 0.2, 0.4, 0.6, 0.7))
+    val fromOffset = 0
+    val toOffset = col.values.length
+    val split = new ContinuousSplit(0, threshold = 0.5)
+    val bitv = AltDT.bitSubvectorFromSplit(col, fromOffset, toOffset, split)
+    assert(bitv.from === fromOffset)
+    assert(bitv.to === toOffset)
+    assert(bitv.iterator.toSet === Set(3, 4))
+  }
+
+  test("bitSubvectorFromSplit: 2 nodes") {
+    // Initially, 1 split: (0, 2, 4) | (1, 3)
+    val col = new FeatureVector(0, FeatureType.Continuous, Array(0.1, 0.2, 0.4, 0.6, 0.7),
+      Array(4, 2, 0, 1, 3))
+    def checkSplit(fromOffset: Int, toOffset: Int, threshold: Double, expectedRight: Set[Int]): Unit = {
+      val split = new ContinuousSplit(0, threshold)
+      val bitv = AltDT.bitSubvectorFromSplit(col, fromOffset, toOffset, split)
+      assert(bitv.from === fromOffset)
+      assert(bitv.to === toOffset)
+      assert(bitv.iterator.toSet === expectedRight)
+    }
+    // Left child node
+    checkSplit(0, 3, 0.15, Set(0, 1))
+    checkSplit(0, 3, 0.2, Set(0))
+    checkSplit(0, 3, 0.5, Set())
+    // Right child node
+    checkSplit(3, 5, 0.1, Set(3, 4))
+    checkSplit(3, 5, 0.65, Set(4))
+    checkSplit(3, 5, 0.8, Set())
+  }
+
   test("computeBestSplits") {
 
   }
@@ -102,7 +173,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   test("computeActiveNodePeriphery") {
   }
 
-  test("collectBitVectors") {
+  test("collectBitVectors with 1 vector") {
     val col =
       FeatureVector.fromOriginal(0, FeatureType.Continuous, Vectors.dense(0.1, 0.2, 0.4, 0.6, 0.7))
     val numRows = col.values.length
@@ -117,6 +188,23 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val bitv = bitVectors.head
     assert(bitv.numBits === numRows)
     assert(bitv.iterator.toArray === Array(3, 4))
+  }
+
+  test("collectBitVectors with 1 vector, with tied threshold") {
+    val col = new FeatureVector(0, FeatureType.Continuous,
+      Array(-4.0,-4.0,-2.0,-2.0,-1.0,-1.0,1.0,1.0), Array(3,7,2,6,1,5,0,4))
+    val numRows = col.values.length
+    val activeNodes = new BitSet(1)
+    activeNodes.set(0)
+    val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
+    val partitionInfos = sc.parallelize(Seq(info))
+    val bestSplitAndGain = (new ContinuousSplit(0, threshold = -2.0),
+      new InfoGainStats(0, 0, 0, 0, 0, new Predict(0, 0), new Predict(0, 0)))
+    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(bestSplitAndGain))
+    assert(bitVectors.length === 1)
+    val bitv = bitVectors.head
+    assert(bitv.numBits === numRows)
+    assert(bitv.iterator.toArray === Array(0, 1, 4, 5))
   }
 
 }
