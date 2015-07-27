@@ -46,9 +46,9 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     println(model.toDebugString) // TODO: remove println
     assert(model.rootNode.isInstanceOf[InternalNode])
     val root = model.rootNode.asInstanceOf[InternalNode]
-    assert(root.leftChild.isInstanceOf[LeafNode] && root.rightChild.isInstanceOf[InternalNode])
-    val right = root.rightChild.asInstanceOf[InternalNode]
-    assert(right.leftChild.isInstanceOf[InternalNode], right.rightChild.isInstanceOf[InternalNode])
+    assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[LeafNode])
+    val left = root.leftChild.asInstanceOf[InternalNode]
+    assert(left.leftChild.isInstanceOf[LeafNode], left.rightChild.isInstanceOf[LeafNode])
   }
 
   test("run example") {
