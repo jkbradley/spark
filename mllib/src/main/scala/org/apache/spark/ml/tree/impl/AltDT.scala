@@ -52,8 +52,8 @@ import org.apache.spark.util.collection.BitSet
  */
 private[ml] object AltDT extends Logging {
 
-  private def myPrint(s: String = ""): Unit = print(s)
-  private def myPrintln(s: String = ""): Unit = println(s)
+  private def myPrint(s: String = ""): Unit = return // print(s)
+  private def myPrintln(s: String = ""): Unit = return // println(s)
 
   private[impl] def createImpurityAggregator(strategy: Strategy): ImpurityAggregatorSingle = {
     strategy.impurity match {
@@ -152,9 +152,13 @@ private[ml] object AltDT extends Logging {
       // Compute best split for each active node.
       val bestSplitsAndGains: Array[(Split, InfoGainStats)] =
         computeBestSplits(partitionInfos, labelsBc, strategy)
+      /*
+      // NOTE: The actual active nodes (activeNodePeriphery) may be a subset of the nodes under
+      //       bestSplitsAndGains since
       assert(activeNodePeriphery.length == bestSplitsAndGains.length,
         s"activeNodePeriphery.length=${activeNodePeriphery.length} does not equal" +
           s" bestSplitsAndGains.length=${bestSplitsAndGains.length}")
+      */
 
       // Update current model and node periphery.
       // Note: This flatMap has side effects (on the model).
@@ -163,14 +167,15 @@ private[ml] object AltDT extends Logging {
       myPrintln(s"(D) activeNodePeriphery.length: ${activeNodePeriphery.length}")
       // We keep all old nodeOffsets and add one for each node split.
       // Each node split adds 2 nodes to activeNodePeriphery.
+      // TODO: Should this be calculated after filtering for impurity??
       numNodeOffsets = numNodeOffsets + activeNodePeriphery.length / 2
       myPrintln(s"(D) numNodeOffsets: $numNodeOffsets")
 
       // Filter active node periphery by impurity.
-      activeNodePeriphery = activeNodePeriphery.filter(_.impurity > 0.0)
+      val estimatedRemainingActive = activeNodePeriphery.count(_.impurity > 0.0)
 
       // TODO: Check to make sure we split something, and stop otherwise.
-      doneLearning = currentLevel + 1 >= strategy.maxDepth || activeNodePeriphery.length == 0
+      doneLearning = currentLevel + 1 >= strategy.maxDepth || estimatedRemainingActive == 0
 
       if (!doneLearning) {
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right.
@@ -255,11 +260,12 @@ private[ml] object AltDT extends Logging {
   }
 
   /**
-   *
-   * @param oldPeriphery
-   * @param bestSplitsAndGains
-   * @param minInfoGain
-   * @return
+   * On driver: Grow tree based on chosen splits, and compute new set of active nodes.
+   * @param oldPeriphery  Old periphery of active nodes.
+   * @param bestSplitsAndGains  Best (split, gain) pairs, which can be zipped with the old
+   *                            periphery.
+   * @param minInfoGain  Threshold for min info gain required to split a node.
+   * @return  New active node periphery
    */
   private[impl] def computeActiveNodePeriphery(
       oldPeriphery: Array[LearningNode],
@@ -268,11 +274,11 @@ private[ml] object AltDT extends Logging {
     bestSplitsAndGains.zipWithIndex.flatMap {
       case ((split, stats), nodeIdx) =>
         val node = oldPeriphery(nodeIdx)
-        node.predictionStats = new OldPredict(stats.prediction, -1)
-        node.impurity = stats.impurity
         myPrintln(s"(D) nodeIdx: $nodeIdx, gain: ${stats.gain}")
         if (stats.gain > minInfoGain) {
           // TODO: Add prediction probability once that is added properly to trees
+          node.predictionStats = new OldPredict(stats.prediction, -1)
+          node.impurity = stats.impurity
           node.leftChild =
             Some(LearningNode(node.id * 2, stats.leftPredict, stats.leftImpurity, isLeaf = false)) // TODO: remove node id
           node.rightChild =
