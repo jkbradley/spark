@@ -28,10 +28,10 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.FeatureType.FeatureType
 import org.apache.spark.mllib.tree.configuration.{FeatureType, Strategy}
 import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy}
-import org.apache.spark.mllib.tree.model.{Predict => OldPredict, ImpurityStats}
+import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.util.collection.BitSet
+import org.apache.spark.util.collection.{BitSet, OpenHashSet}
 
 
 /**
@@ -84,6 +84,9 @@ private[ml] object AltDT extends Logging {
       return new LeafNode(impurityCalculator.getPredict.predict, impurityCalculator.calculate(),
         impurityCalculator)
     }
+
+    // Choose categorical features to be ordered or unordered.
+    val unorderedFeatures: Set[Int] = chooseUnorderedFeatures(strategy)
 
     // Prepare column store.
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
@@ -141,7 +144,7 @@ private[ml] object AltDT extends Logging {
       val partitionInfos = partitionInfosDebug.last
 
       // Compute best split for each active node.
-      val bestSplitsAndGains: Array[(Split, InfoGainStats)] =
+      val bestSplitsAndGains: Array[(Split, ImpurityStats)] =
         computeBestSplits(partitionInfos, labelsBc, strategy)
       /*
       // NOTE: The actual active nodes (activeNodePeriphery) may be a subset of the nodes under
@@ -161,7 +164,7 @@ private[ml] object AltDT extends Logging {
       numNodeOffsets = numNodeOffsets + activeNodePeriphery.length / 2
 
       // Filter active node periphery by impurity.
-      val estimatedRemainingActive = activeNodePeriphery.count(_.impurity > 0.0)
+      val estimatedRemainingActive = activeNodePeriphery.count(_.stats.impurity > 0.0)
 
       // TODO: Check to make sure we split something, and stop otherwise.
       doneLearning = currentLevel + 1 >= strategy.maxDepth || estimatedRemainingActive == 0
@@ -176,7 +179,7 @@ private[ml] object AltDT extends Logging {
         val partitionInfosB = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
         }
-        partitionInfosB.cache().count() // TODO: remove
+        partitionInfosB.cache().count() // TODO: remove.  For some reason, this is needed to make things work.  Probably messing up somewhere above...
         partitionInfosDebug.append(partitionInfosB)
 
         // TODO: unpersist aggBitVectorsBc after action.
@@ -188,8 +191,67 @@ private[ml] object AltDT extends Logging {
     // Done with learning
     groupedColStore.unpersist()
     labelsBc.unpersist()
-    // TODO: return model
     rootNode.toNode
+  }
+
+  /**
+   * Choose which categorical features are unordered vs. ordered.
+   *
+   * TODO: This was copied from DecisionTreeMetadata.  When merging, make sure to eliminate duplicate code.
+   * @return  Set of unordered feature indices
+   */
+  private[impl] def chooseUnorderedFeatures(strategy: Strategy, numExamples: Long, numFeatures: Int): Set[Int] = {
+    val maxPossibleBins = math.min(strategy.maxBins, numExamples).toInt
+    if (maxPossibleBins < strategy.maxBins) {
+      logWarning(s"DecisionTree reducing maxBins from ${strategy.maxBins} to $maxPossibleBins" +
+        s" (= number of training instances)")
+    }
+    // We check the number of bins here against maxPossibleBins.
+    // This needs to be checked here instead of in Strategy since maxPossibleBins can be modified
+    // based on the number of training examples.
+    if (strategy.categoricalFeaturesInfo.nonEmpty) {
+      val maxCategoriesPerFeature = strategy.categoricalFeaturesInfo.values.max
+      val maxCategory =
+        strategy.categoricalFeaturesInfo.find(_._2 == maxCategoriesPerFeature).get._1
+      require(maxCategoriesPerFeature <= maxPossibleBins,
+        s"DecisionTree requires maxBins (= $maxPossibleBins) to be at least as large as the " +
+          s"number of values in each categorical feature, but categorical feature $maxCategory " +
+          s"has $maxCategoriesPerFeature values. Considering remove this and other categorical " +
+          "features with a large number of values, or add more training examples.")
+    }
+
+    val unorderedFeatures = new OpenHashSet[Int]()
+    val numBins = Array.fill[Int](numFeatures)(maxPossibleBins)
+    if (numClasses > 2) {
+      // Multiclass classification
+      val maxCategoriesForUnorderedFeature =
+        ((math.log(maxPossibleBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
+      strategy.categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
+        // Hack: If a categorical feature has only 1 category, we treat it as continuous.
+        // TODO(SPARK-9957): Handle this properly by filtering out those features.
+        if (numCategories > 1) {
+          // Decide if some categorical features should be treated as unordered features,
+          //  which require 2 * ((1 << numCategories - 1) - 1) bins.
+          // We do this check with log values to prevent overflows in case numCategories is large.
+          // The next check is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
+          if (numCategories <= maxCategoriesForUnorderedFeature) {
+            unorderedFeatures.add(featureIndex)
+            numBins(featureIndex) = numUnorderedBins(numCategories)
+          } else {
+            numBins(featureIndex) = numCategories
+          }
+        }
+      }
+    } else {
+      // Binary classification or regression
+      strategy.categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
+        // If a categorical feature has only 1 category, we treat it as continuous: SPARK-9957
+        if (numCategories > 1) {
+          numBins(featureIndex) = numCategories
+        }
+      }
+    }
+
   }
 
   /**
@@ -205,7 +267,7 @@ private[ml] object AltDT extends Logging {
   private[impl] def computeBestSplits(
       partitionInfos: RDD[PartitionInfo],
       labelsBc: Broadcast[Array[Double]],
-      strategy: Strategy): Array[(Split, InfoGainStats)] = {
+      strategy: Strategy): Array[(Split, ImpurityStats)] = {
     // On each partition, for each feature on the partition, select the best split for each node.
     // This will use:
     //  - groupedColStore (the features)
@@ -213,7 +275,7 @@ private[ml] object AltDT extends Logging {
     //  - labelsBc (the labels column)
     // Each worker returns:
     //   for each active node, best split + info gain
-    val partBestSplitsAndGains: RDD[Array[(Split, InfoGainStats)]] = partitionInfos.map {
+    val partBestSplitsAndGains: RDD[Array[(Split, ImpurityStats)]] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int], activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
@@ -253,21 +315,20 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def computeActiveNodePeriphery(
       oldPeriphery: Array[LearningNode],
-      bestSplitsAndGains: Array[(Split, InfoGainStats)],
+      bestSplitsAndGains: Array[(Split, ImpurityStats)],
       minInfoGain: Double): Array[LearningNode] = {
     bestSplitsAndGains.zipWithIndex.flatMap {
       case ((split, stats), nodeIdx) =>
         val node = oldPeriphery(nodeIdx)
         if (stats.gain > minInfoGain) {
-          // TODO: Add prediction probability once that is added properly to trees
-          node.predictionStats = new OldPredict(stats.prediction, -1)
-          node.impurity = stats.impurity
-          node.leftChild =
-            Some(LearningNode(node.id * 2, stats.leftPredict, stats.leftImpurity, isLeaf = false)) // TODO: remove node id
-          node.rightChild =
-            Some(LearningNode(node.id * 2 + 1, stats.rightPredict, stats.rightImpurity, isLeaf = false)) // TODO: remove node id
+          // TODO: remove node id
+          node.leftChild = Some(LearningNode(node.id * 2, isLeaf = false,
+            ImpurityStats(stats.leftImpurity, stats.leftImpurityCalculator)))
+          node.rightChild = Some(LearningNode(node.id * 2 + 1, isLeaf = false,
+            ImpurityStats(stats.rightImpurity, stats.rightImpurityCalculator)))
           node.split = Some(split)
-          node.stats = Some(stats.toOld)
+          node.isLeaf = false
+          node.stats = stats
           Iterator(node.leftChild.get, node.rightChild.get)
         } else {
           node.isLeaf = true
@@ -289,7 +350,7 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def collectBitVectors(
       partitionInfos: RDD[PartitionInfo],
-      bestSplitsAndGains: Array[(Split, InfoGainStats)]): Array[BitSubvector] = {
+      bestSplitsAndGains: Array[(Split, ImpurityStats)]): Array[BitSubvector] = {
     val bestSplitsBc: Broadcast[Array[Split]] =
       partitionInfos.sparkContext.broadcast(bestSplitsAndGains.map(_._1))
     val workerBitSubvectors: RDD[Array[BitSubvector]] = partitionInfos.map {
@@ -331,7 +392,6 @@ private[ml] object AltDT extends Logging {
       toOffset: Int,
       impurityAgg: ImpurityAggregatorSingle,
       minInfoGain: Double): (Split, ImpurityStats) = {
-    val featureIndex = col.featureIndex
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
     impurityAgg.clear()
@@ -365,10 +425,8 @@ private[ml] object AltDT extends Logging {
       leftImpurityAgg: ImpurityAggregatorSingle,
       rightImpurityAgg: ImpurityAggregatorSingle,
       minInfoGain: Double): (Split, ImpurityStats) = {
-    val prediction = leftImpurityAgg.getCalculator.getPredict
-
     var bestThreshold: Double = Double.NegativeInfinity
-    var bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+    val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
     var bestGain: Double = 0.0
     val fullImpurity = rightImpurityAgg.getCalculator.calculate()
     var leftCount: Double = 0.0
@@ -397,10 +455,8 @@ private[ml] object AltDT extends Logging {
       rightCount -= 1.0
     }
 
-    val leftImpurity = bestLeftImpurityAgg.getCalculator.calculate()
     val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
     val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
-    val rightImpurity = bestRightImpurityAgg.getCalculator.calculate()
     val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
       bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
     (new ContinuousSplit(featureIndex, bestThreshold), bestImpurityStats)

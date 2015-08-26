@@ -103,13 +103,13 @@ private[spark] class ImpurityStats(
       s"right impurity = $rightImpurity"
   }
 
-  def leftImpurity: Double = if (leftImpurityCalculator != null) {
+  lazy val leftImpurity: Double = if (leftImpurityCalculator != null) {
     leftImpurityCalculator.calculate()
   } else {
     -1.0
   }
 
-  def rightImpurity: Double = if (rightImpurityCalculator != null) {
+  lazy val rightImpurity: Double = if (rightImpurityCalculator != null) {
     rightImpurityCalculator.calculate()
   } else {
     -1.0
@@ -117,6 +117,16 @@ private[spark] class ImpurityStats(
 }
 
 private[spark] object ImpurityStats {
+
+  /**
+   * Create stats object missing the child node info.
+   */
+  def apply(
+      impurity: Double,
+      impurityCalculator: ImpurityCalculator,
+      valid: Boolean = true): ImpurityStats = {
+    new ImpurityStats(Double.NaN, impurity, impurityCalculator, null, null, valid)
+  }
 
   /**
    * Return an [[org.apache.spark.mllib.tree.model.ImpurityStats]] object to
