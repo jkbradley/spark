@@ -288,7 +288,7 @@ private[tree] object LearningNode {
       id: Int,
       isLeaf: Boolean,
       stats: ImpurityStats): LearningNode = {
-    new LearningNode(id, None, None, None, false, stats)
+    new LearningNode(id, None, None, None, isLeaf, stats)
   }
 
   /** Create an empty node with the given node index.  Values must be set later on. */
