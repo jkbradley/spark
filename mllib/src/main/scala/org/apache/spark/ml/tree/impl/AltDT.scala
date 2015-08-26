@@ -28,7 +28,7 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.FeatureType.FeatureType
 import org.apache.spark.mllib.tree.configuration.{FeatureType, Strategy}
 import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy}
-import org.apache.spark.mllib.tree.model.{Predict => OldPredict}
+import org.apache.spark.mllib.tree.model.{Predict => OldPredict, ImpurityStats}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.collection.BitSet
@@ -69,7 +69,7 @@ private[ml] object AltDT extends Logging {
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
     val rootNode = trainImpl(input, strategy)
-    RandomForest.finalizeTree(rootNode, strategy.algo, parentUID)
+    RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
@@ -81,7 +81,8 @@ private[ml] object AltDT extends Logging {
           (agg, lp) => agg.update(lp.label, 1.0),
           (agg1, agg2) => agg1.add(agg2))
       val impurityCalculator = impurityAggregator.getCalculator
-      return new LeafNode(impurityCalculator.getPredict.predict, impurityCalculator.calculate())
+      return new LeafNode(impurityCalculator.getPredict.predict, impurityCalculator.calculate(),
+        impurityCalculator)
     }
 
     // Prepare column store.
@@ -329,7 +330,7 @@ private[ml] object AltDT extends Logging {
       fromOffset: Int,
       toOffset: Int,
       impurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, InfoGainStats) = {
+      minInfoGain: Double): (Split, ImpurityStats) = {
     val featureIndex = col.featureIndex
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
@@ -352,7 +353,7 @@ private[ml] object AltDT extends Logging {
       labels: Seq[Double],
       leftImpurityAgg: ImpurityAggregatorSingle,
       rightImpurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, InfoGainStats) = ???
+      minInfoGain: Double): (Split, ImpurityStats) = ???
 
   /**
    * Choose splitting rule: feature value <= threshold
@@ -363,7 +364,7 @@ private[ml] object AltDT extends Logging {
       labels: Seq[Double],
       leftImpurityAgg: ImpurityAggregatorSingle,
       rightImpurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, InfoGainStats) = {
+      minInfoGain: Double): (Split, ImpurityStats) = {
     val prediction = leftImpurityAgg.getCalculator.getPredict
 
     var bestThreshold: Double = Double.NegativeInfinity
@@ -397,13 +398,12 @@ private[ml] object AltDT extends Logging {
     }
 
     val leftImpurity = bestLeftImpurityAgg.getCalculator.calculate()
-    val bestRightImpurityAgg =
-      leftImpurityAgg.deepCopy().add(rightImpurityAgg).subtract(bestLeftImpurityAgg)
+    val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
+    val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
     val rightImpurity = bestRightImpurityAgg.getCalculator.calculate()
-    val bestGainStats = new InfoGainStats(prediction.predict, bestGain, fullImpurity,
-      leftImpurity, rightImpurity, bestLeftImpurityAgg.getCalculator.getPredict,
-      bestRightImpurityAgg.getCalculator.getPredict)
-    (new ContinuousSplit(featureIndex, bestThreshold), bestGainStats)
+    val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
+      bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
+    (new ContinuousSplit(featureIndex, bestThreshold), bestImpurityStats)
   }
 
   /**
