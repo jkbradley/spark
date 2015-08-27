@@ -25,8 +25,7 @@ import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.tree.configuration.FeatureType.FeatureType
-import org.apache.spark.mllib.tree.configuration.{FeatureType, Strategy}
+import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, FeatureType, Strategy}
 import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy}
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
@@ -73,6 +72,10 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
+    // Get data stats.
+    val numExamples: Long = input.count()
+    val numFeatures: Int = input.first().features.size
+
     // The case with 1 node (depth = 0) is handled separately.
     // This allows all iterations in the depth > 0 case to use the same code.
     if (strategy.maxDepth == 0) {
@@ -86,7 +89,7 @@ private[ml] object AltDT extends Logging {
     }
 
     // Choose categorical features to be ordered or unordered.
-    val unorderedFeatures: Set[Int] = chooseUnorderedFeatures(strategy)
+    val unorderedFeatures: Set[Int] = chooseUnorderedFeatures(strategy, numExamples, numFeatures)
 
     // Prepare column store.
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
@@ -94,6 +97,7 @@ private[ml] object AltDT extends Logging {
     //       Or is the mapping implicit (i.e., not costly)?
     val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features))
     val numRows: Int = colStoreInit.first()._2.size
+    assert(numRows == numExamples.toInt, s"Data transpose had unknown failure")
     val labels = new Array[Double](numRows)
     input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
       labels(rowIndex.toInt) = label
@@ -200,7 +204,10 @@ private[ml] object AltDT extends Logging {
    * TODO: This was copied from DecisionTreeMetadata.  When merging, make sure to eliminate duplicate code.
    * @return  Set of unordered feature indices
    */
-  private[impl] def chooseUnorderedFeatures(strategy: Strategy, numExamples: Long, numFeatures: Int): Set[Int] = {
+  private[impl] def chooseUnorderedFeatures(
+      strategy: Strategy,
+      numExamples: Long,
+      numFeatures: Int): Set[Int] = {
     val maxPossibleBins = math.min(strategy.maxBins, numExamples).toInt
     if (maxPossibleBins < strategy.maxBins) {
       logWarning(s"DecisionTree reducing maxBins from ${strategy.maxBins} to $maxPossibleBins" +
@@ -222,7 +229,7 @@ private[ml] object AltDT extends Logging {
 
     val unorderedFeatures = new OpenHashSet[Int]()
     val numBins = Array.fill[Int](numFeatures)(maxPossibleBins)
-    if (numClasses > 2) {
+    if (strategy.algo == OldAlgo.Classification && strategy.numClasses > 2) {
       // Multiclass classification
       val maxCategoriesForUnorderedFeature =
         ((math.log(maxPossibleBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
@@ -251,8 +258,17 @@ private[ml] object AltDT extends Logging {
         }
       }
     }
-
+    unorderedFeatures.iterator.toSet
   }
+
+  /**
+   * Given the arity of a categorical feature (arity = number of categories),
+   * return the number of bins for the feature if it is to be treated as an unordered feature.
+   * There is 1 split for every partitioning of categories into 2 disjoint, non-empty sets;
+   * there are math.pow(2, arity - 1) - 1 such splits.
+   * Each split has 2 corresponding bins.
+   */
+  def numUnorderedBins(arity: Int): Int = 2 * ((1 << arity - 1) - 1)
 
   /**
    * Find the best splits for all active nodes.
@@ -473,7 +489,7 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] class FeatureVector(
       val featureIndex: Int,
-      val featureType: FeatureType,
+      val featureType: FeatureType.FeatureType,
       val values: Array[Double],
       val indices: Array[Int])
     extends Serializable {
@@ -505,7 +521,7 @@ private[ml] object AltDT extends Logging {
     /** Store column sorted by feature values. */
     def fromOriginal(
         featureIndex: Int,
-        featureType: FeatureType,
+        featureType: FeatureType.FeatureType,
         featureVector: Vector): FeatureVector = {
       val (values, indices) = featureVector.toArray.zipWithIndex.sorted.unzip
       new FeatureVector(featureIndex, featureType, values.toArray, indices.toArray)
