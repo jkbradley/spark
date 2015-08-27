@@ -26,7 +26,7 @@ import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, FeatureType, Strategy}
-import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy}
+import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy, Impurity}
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
@@ -51,12 +51,45 @@ import org.apache.spark.util.collection.{BitSet, OpenHashSet}
  */
 private[ml] object AltDT extends Logging {
 
-  private[impl] def createImpurityAggregator(strategy: Strategy): ImpurityAggregatorSingle = {
-    strategy.impurity match {
-      case Entropy => new EntropyAggregatorSingle(strategy.numClasses)
-      case Gini => new GiniAggregatorSingle(strategy.numClasses)
-      case Variance => new VarianceAggregatorSingle
+  private[impl] class AltDTMetadata(
+      val numClasses: Int,
+      val maxBins: Int,
+      val minInfoGain: Double,
+      val impurity: Impurity) extends Serializable {
+
+    private val maxCategoriesForUnorderedFeature =
+      ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
+
+    def isClassification: Boolean = numClasses >= 2
+
+    /**
+     * Indicates whether a categorical feature should be treated as unordered.
+     *
+     * TODO(SPARK-9957): If a categorical feature has only 1 category, we treat it as continuous.
+     *                   Later, handle this properly by filtering out those features.
+     */
+    def isUnorderedFeature(numCategories: Int): Boolean = {
+
+      // Decide if some categorical features should be treated as unordered features,
+      //  which require 2 * ((1 << numCategories - 1) - 1) bins.
+      // We do this check with log values to prevent overflows in case numCategories is large.
+      // The last inequality is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
+      numClasses > 2 && numCategories > 1 &&
+        numCategories <= maxCategoriesForUnorderedFeature
     }
+
+    def createImpurityAggregator(): ImpurityAggregatorSingle = {
+      impurity match {
+        case Entropy => new EntropyAggregatorSingle(numClasses)
+        case Gini => new GiniAggregatorSingle(numClasses)
+        case Variance => new VarianceAggregatorSingle
+      }
+    }
+  }
+
+  private[impl] object AltDTMetadata {
+    def fromStrategy(strategy: Strategy) = new AltDTMetadata(strategy.numClasses, strategy.maxBins,
+      strategy.minInfoGain, strategy.impurity)
   }
 
   /**
@@ -72,15 +105,13 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
-    // Get data stats.
-    val numExamples: Long = input.count()
-    val numFeatures: Int = input.first().features.size
+    val metadata = AltDTMetadata.fromStrategy(strategy)
 
     // The case with 1 node (depth = 0) is handled separately.
     // This allows all iterations in the depth > 0 case to use the same code.
     if (strategy.maxDepth == 0) {
       val impurityAggregator: ImpurityAggregatorSingle =
-        input.aggregate(createImpurityAggregator(strategy))(
+        input.aggregate(metadata.createImpurityAggregator())(
           (agg, lp) => agg.update(lp.label, 1.0),
           (agg1, agg2) => agg1.add(agg2))
       val impurityCalculator = impurityAggregator.getCalculator
@@ -88,16 +119,12 @@ private[ml] object AltDT extends Logging {
         impurityCalculator)
     }
 
-    // Choose categorical features to be ordered or unordered.
-    val unorderedFeatures: Set[Int] = chooseUnorderedFeatures(strategy, numExamples, numFeatures)
-
     // Prepare column store.
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
     // TODO: Is this mapping from arrays to iterators to arrays (when constructing learningData)?
     //       Or is the mapping implicit (i.e., not costly)?
     val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features))
     val numRows: Int = colStoreInit.first()._2.size
-    assert(numRows == numExamples.toInt, s"Data transpose had unknown failure")
     val labels = new Array[Double](numRows)
     input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
       labels(rowIndex.toInt) = label
@@ -107,15 +134,15 @@ private[ml] object AltDT extends Logging {
     //       rather than 1 copy per worker.  This means a lot of random accesses.
     //       We could improve this by applying first-level sorting (by node) to labels.
 
+    // TODO: RIGHT HERE NOW: JUST ADDED ISUNORDERED
+
     // Sort each column by feature values.
     val colStore: RDD[FeatureVector] = colStoreInit.map { case (featureIndex: Int, col: Vector) =>
-      if (strategy.categoricalFeaturesInfo.contains(featureIndex)) {
-        FeatureVector.fromOriginal(featureIndex, FeatureType.Categorical, col)
-      } else {
-        FeatureVector.fromOriginal(featureIndex, FeatureType.Continuous, col)
-      }
+      val featureArity: Int = strategy.categoricalFeaturesInfo.getOrElse(featureIndex, 0)
+      FeatureVector.fromOriginal(featureIndex, featureArity, col)
     }
     // Group columns together into one array of columns per partition.
+    // TODO: Test avoiding this grouping, and see if it matters.
     val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions { iterator =>
       val groupedCols = new ArrayBuffer[FeatureVector]
       iterator.foreach(groupedCols += _)
@@ -126,7 +153,7 @@ private[ml] object AltDT extends Logging {
     // Initialize partitions with 1 node (each instance at the root node).
     var partitionInfosA: RDD[PartitionInfo] = groupedColStore.map { groupedCols =>
       val initActive = new BitSet(1)
-      initActive.setUntil(1)
+      initActive.set(0)
       new PartitionInfo(groupedCols, Array[Int](0, numRows), initActive)
     }
 
@@ -149,7 +176,7 @@ private[ml] object AltDT extends Logging {
 
       // Compute best split for each active node.
       val bestSplitsAndGains: Array[(Split, ImpurityStats)] =
-        computeBestSplits(partitionInfos, labelsBc, strategy)
+        computeBestSplits(partitionInfos, labelsBc, metadata)
       /*
       // NOTE: The actual active nodes (activeNodePeriphery) may be a subset of the nodes under
       //       bestSplitsAndGains since
@@ -199,69 +226,6 @@ private[ml] object AltDT extends Logging {
   }
 
   /**
-   * Choose which categorical features are unordered vs. ordered.
-   *
-   * TODO: This was copied from DecisionTreeMetadata.  When merging, make sure to eliminate duplicate code.
-   * @return  Set of unordered feature indices
-   */
-  private[impl] def chooseUnorderedFeatures(
-      strategy: Strategy,
-      numExamples: Long,
-      numFeatures: Int): Set[Int] = {
-    val maxPossibleBins = math.min(strategy.maxBins, numExamples).toInt
-    if (maxPossibleBins < strategy.maxBins) {
-      logWarning(s"DecisionTree reducing maxBins from ${strategy.maxBins} to $maxPossibleBins" +
-        s" (= number of training instances)")
-    }
-    // We check the number of bins here against maxPossibleBins.
-    // This needs to be checked here instead of in Strategy since maxPossibleBins can be modified
-    // based on the number of training examples.
-    if (strategy.categoricalFeaturesInfo.nonEmpty) {
-      val maxCategoriesPerFeature = strategy.categoricalFeaturesInfo.values.max
-      val maxCategory =
-        strategy.categoricalFeaturesInfo.find(_._2 == maxCategoriesPerFeature).get._1
-      require(maxCategoriesPerFeature <= maxPossibleBins,
-        s"DecisionTree requires maxBins (= $maxPossibleBins) to be at least as large as the " +
-          s"number of values in each categorical feature, but categorical feature $maxCategory " +
-          s"has $maxCategoriesPerFeature values. Considering remove this and other categorical " +
-          "features with a large number of values, or add more training examples.")
-    }
-
-    val unorderedFeatures = new OpenHashSet[Int]()
-    val numBins = Array.fill[Int](numFeatures)(maxPossibleBins)
-    if (strategy.algo == OldAlgo.Classification && strategy.numClasses > 2) {
-      // Multiclass classification
-      val maxCategoriesForUnorderedFeature =
-        ((math.log(maxPossibleBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
-      strategy.categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
-        // Hack: If a categorical feature has only 1 category, we treat it as continuous.
-        // TODO(SPARK-9957): Handle this properly by filtering out those features.
-        if (numCategories > 1) {
-          // Decide if some categorical features should be treated as unordered features,
-          //  which require 2 * ((1 << numCategories - 1) - 1) bins.
-          // We do this check with log values to prevent overflows in case numCategories is large.
-          // The next check is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
-          if (numCategories <= maxCategoriesForUnorderedFeature) {
-            unorderedFeatures.add(featureIndex)
-            numBins(featureIndex) = numUnorderedBins(numCategories)
-          } else {
-            numBins(featureIndex) = numCategories
-          }
-        }
-      }
-    } else {
-      // Binary classification or regression
-      strategy.categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
-        // If a categorical feature has only 1 category, we treat it as continuous: SPARK-9957
-        if (numCategories > 1) {
-          numBins(featureIndex) = numCategories
-        }
-      }
-    }
-    unorderedFeatures.iterator.toSet
-  }
-
-  /**
    * Given the arity of a categorical feature (arity = number of categories),
    * return the number of bins for the feature if it is to be treated as an unordered feature.
    * There is 1 split for every partitioning of categories into 2 disjoint, non-empty sets;
@@ -277,13 +241,13 @@ private[ml] object AltDT extends Logging {
    *  - The splits across workers are aggregated to the driver.
    * @param partitionInfos
    * @param labelsBc
-   * @param strategy
+   * @param metadata
    * @return
    */
   private[impl] def computeBestSplits(
       partitionInfos: RDD[PartitionInfo],
       labelsBc: Broadcast[Array[Double]],
-      strategy: Strategy): Array[(Split, ImpurityStats)] = {
+      metadata: AltDTMetadata): Array[(Split, ImpurityStats)] = {
     // On each partition, for each feature on the partition, select the best split for each node.
     // This will use:
     //  - groupedColStore (the features)
@@ -300,8 +264,7 @@ private[ml] object AltDT extends Logging {
           val toOffset = nodeOffsets(nodeIndexInLevel + 1)
           val splitsAndStats =
             columns.map { col =>
-              chooseSplit(col, localLabels, fromOffset, toOffset,
-                createImpurityAggregator(strategy), strategy.minInfoGain)
+              chooseSplit(col, localLabels, fromOffset, toOffset, metadata)
             }
           // We use Iterator and flatMap to handle empty partitions.
           splitsAndStats.maxBy(_._2.gain)
@@ -406,24 +369,36 @@ private[ml] object AltDT extends Logging {
       labels: Array[Double],
       fromOffset: Int,
       toOffset: Int,
-      impurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, ImpurityStats) = {
+      metadata: AltDTMetadata): (Split, ImpurityStats) = {
+    val impurityAgg = metadata.createImpurityAggregator()
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
     impurityAgg.clear()
     val fullImpurityAgg = impurityAgg.deepCopy()
     labelsForNode.foreach(fullImpurityAgg.update(_, 1.0))
-    col.featureType match {
-      case FeatureType.Categorical =>
-        chooseCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
-          fullImpurityAgg, minInfoGain)
-      case FeatureType.Continuous =>
-        chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
-          fullImpurityAgg, minInfoGain)
+    if (col.isCategorical) {
+      if (metadata.isUnorderedFeature(col.featureArity)) {
+        chooseUnorderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
+          fullImpurityAgg, metadata.minInfoGain)
+      } else {
+        chooseOrderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
+          fullImpurityAgg, metadata.minInfoGain)
+      }
+    } else {
+      chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
+        fullImpurityAgg, metadata.minInfoGain)
     }
   }
 
-  private[impl] def chooseCategoricalSplit(
+  private[impl] def chooseOrderedCategoricalSplit(
+      featureIndex: Int,
+      values: Seq[Double],
+      labels: Seq[Double],
+      leftImpurityAgg: ImpurityAggregatorSingle,
+      rightImpurityAgg: ImpurityAggregatorSingle,
+      minInfoGain: Double): (Split, ImpurityStats) = ???
+
+  private[impl] def chooseUnorderedCategoricalSplit(
       featureIndex: Int,
       values: Seq[Double],
       labels: Seq[Double],
@@ -486,32 +461,37 @@ private[ml] object AltDT extends Logging {
    * These values are currently stored in a dense representation only.
    * TODO: Support sparse storage (to optimize deeper levels of the tree), and maybe compressed
    *       storage (to optimize upper levels of the tree).
+   * @param featureArity  For categorical features, this gives the number of categories.
+   *                      For continuous features, this should be set to 0.
    */
   private[impl] class FeatureVector(
       val featureIndex: Int,
-      val featureType: FeatureType.FeatureType,
+      val featureArity: Int,
       val values: Array[Double],
       val indices: Array[Int])
     extends Serializable {
+
+    def isCategorical: Boolean = featureArity > 0
 
     /** For debugging */
     override def toString: String = {
       "  FeatureVector(" +
         s"    featureIndex: $featureIndex,\n" +
-        s"    featureType: $featureType,\n" +
+        s"    featureType: ${if (featureArity == 0) "Continuous" else "Categorical"},\n" +
+        s"    featureArity: $featureArity,\n" +
         s"    values: ${values.mkString(", ")},\n" +
         s"    indices: ${indices.mkString(", ")},\n" +
         "  )"
     }
 
     def deepCopy(): FeatureVector =
-      new FeatureVector(featureIndex, featureType, values.clone(), indices.clone())
+      new FeatureVector(featureIndex, featureArity, values.clone(), indices.clone())
 
     override def equals(other: Any): Boolean = {
       other match {
         case o: FeatureVector =>
-          featureIndex == o.featureIndex && featureType == o.featureType &&
-          values.sameElements(o.values) && indices.sameElements(o.indices)
+          featureIndex == o.featureIndex && featureArity == o.featureArity &&
+            values.sameElements(o.values) && indices.sameElements(o.indices)
         case _ => false
       }
     }
@@ -521,10 +501,10 @@ private[ml] object AltDT extends Logging {
     /** Store column sorted by feature values. */
     def fromOriginal(
         featureIndex: Int,
-        featureType: FeatureType.FeatureType,
+        featureArity: Int,
         featureVector: Vector): FeatureVector = {
       val (values, indices) = featureVector.toArray.zipWithIndex.sorted.unzip
-      new FeatureVector(featureIndex, featureType, values.toArray, indices.toArray)
+      new FeatureVector(featureIndex, featureArity, values.toArray, indices.toArray)
     }
   }
 
