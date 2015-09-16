@@ -62,6 +62,8 @@ private[ml] object AltDT extends Logging {
 
     def isClassification: Boolean = numClasses >= 2
 
+    def isMulticlass: Boolean = numClasses > 2
+
     /**
      * Indicates whether a categorical feature should be treated as unordered.
      *
@@ -69,12 +71,11 @@ private[ml] object AltDT extends Logging {
      *                   Later, handle this properly by filtering out those features.
      */
     def isUnorderedFeature(numCategories: Int): Boolean = {
-
       // Decide if some categorical features should be treated as unordered features,
       //  which require 2 * ((1 << numCategories - 1) - 1) bins.
       // We do this check with log values to prevent overflows in case numCategories is large.
       // The last inequality is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
-      numClasses > 2 && numCategories > 1 &&
+      isMulticlass && numCategories > 1 &&
         numCategories <= maxCategoriesForUnorderedFeature
     }
 
@@ -109,6 +110,8 @@ private[ml] object AltDT extends Logging {
 
     // The case with 1 node (depth = 0) is handled separately.
     // This allows all iterations in the depth > 0 case to use the same code.
+    // TODO: Check that learning works when maxDepth > 0 but learning stops at 1 node (because of
+    //       other parameters).
     if (strategy.maxDepth == 0) {
       val impurityAggregator: ImpurityAggregatorSingle =
         input.aggregate(metadata.createImpurityAggregator())(
@@ -370,41 +373,154 @@ private[ml] object AltDT extends Logging {
       fromOffset: Int,
       toOffset: Int,
       metadata: AltDTMetadata): (Split, ImpurityStats) = {
-    val impurityAgg = metadata.createImpurityAggregator()
     val valuesForNode = col.values.view.slice(fromOffset, toOffset)
     val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
-    impurityAgg.clear()
-    val fullImpurityAgg = impurityAgg.deepCopy()
-    labelsForNode.foreach(fullImpurityAgg.update(_, 1.0))
     if (col.isCategorical) {
       if (metadata.isUnorderedFeature(col.featureArity)) {
-        chooseUnorderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
-          fullImpurityAgg, metadata.minInfoGain)
+        chooseUnorderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, metadata,
+          col.featureArity)
       } else {
-        chooseOrderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
-          fullImpurityAgg, metadata.minInfoGain)
+        chooseOrderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, metadata,
+          col.featureArity)
       }
     } else {
-      chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, impurityAgg,
-        fullImpurityAgg, metadata.minInfoGain)
+      chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, metadata)
     }
   }
 
+  /**
+   * Find the best split for an ordered categorical feature at a single node.
+   *
+   * Algorithm:
+   *  - For each category, compute a "centroid."
+   *     - For multiclass classification, the centroid is the label impurity.
+   *     - For binary classification and regression, the centroid is the average label.
+   *  - Sort the centroids, and consider splits anywhere in this order.
+   *    Thus, with K categories, we consider K - 1 possible splits.
+   *
+   * @param featureIndex  Index of feature being split.
+   * @param values  Feature values at this node.  Sorted in increasing order.
+   * @param labels  Labels corresponding to values, in the same order.
+   * @return (best split, corresponding impurity statistics)
+   */
   private[impl] def chooseOrderedCategoricalSplit(
       featureIndex: Int,
       values: Seq[Double],
       labels: Seq[Double],
-      leftImpurityAgg: ImpurityAggregatorSingle,
-      rightImpurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, ImpurityStats) = ???
+      metadata: AltDTMetadata,
+      featureArity: Int): (Split, ImpurityStats) = {
+    // TODO: Support high-arity features by using a single array to hold the stats.
+
+    // aggStats(category) = label statistics for category
+    val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
+      _ => metadata.createImpurityAggregator())
+    values.zip(labels).foreach { case (cat, label) =>
+      aggStats(cat.toInt).update(label)
+    }
+
+    // Compute centroids.  centroidsForCategories is a list: (category, centroid)
+    val centroidsForCategories: Seq[(Int, Double)] = if (metadata.isMulticlass) {
+      // For categorical variables in multiclass classification,
+      // the bins are ordered by the impurity of their corresponding labels.
+      Range(0, featureArity).map { case featureValue =>
+        val categoryStats = aggStats(featureValue)
+        val centroid = if (categoryStats.getCount != 0) {
+          categoryStats.getCalculator.calculate()
+        } else {
+          Double.MaxValue
+        }
+        (featureValue, centroid)
+      }
+    } else if (metadata.isClassification) { // binary classification
+      // For categorical variables in binary classification,
+      // the bins are ordered by the centroid of their corresponding labels.
+      Range(0, featureArity).map { case featureValue =>
+        val categoryStats = aggStats(featureValue)
+        val centroid = if (categoryStats.getCount != 0) {
+          assert(categoryStats.stats.length == 2)
+          (categoryStats.stats(1) - categoryStats.stats(0)) / categoryStats.getCount
+        } else {
+          Double.MaxValue
+        }
+        (featureValue, centroid)
+      }
+    } else { // regression
+      // For categorical variables in regression,
+      // the bins are ordered by the centroid of their corresponding labels.
+      Range(0, featureArity).map { case featureValue =>
+        val categoryStats = aggStats(featureValue)
+        val centroid = if (categoryStats.getCount != 0) {
+          categoryStats.getCalculator.predict
+        } else {
+          Double.MaxValue
+        }
+        (featureValue, centroid)
+      }
+    }
+
+    // TODO: RIGHT HERE NOW
+
+    logDebug("Centroids for categorical variable: " + centroidsForCategories.mkString(","))
+
+    val categoriesSortedByCentroid: List[Int] = centroidsForCategories.toList.sortBy(_._2).map(_._1)
+
+    // Cumulative sums of bin statistics for left, right parts of split.
+    val leftImpurityAgg = metadata.createImpurityAggregator()
+    val rightImpurityAgg = metadata.createImpurityAggregator()
+    aggStats.foreach(rightImpurityAgg.add)
+
+    var bestSplitIndex: Int = -1  // index into categoriesSortedByCentroid
+    val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+    var bestGain: Double = -1.0
+    val fullImpurity = rightImpurityAgg.getCalculator.calculate()
+    var leftCount: Double = 0.0
+    var rightCount: Double = rightImpurityAgg.getCount
+    val fullCount: Double = rightCount
+
+    val numSplits = categoriesSortedByCentroid.length - 1
+    var sortedCatIndex = 0
+    while (sortedCatIndex < numSplits) {
+      val cat = categoriesSortedByCentroid(sortedCatIndex)
+      // Update left, right stats
+      val catStats = aggStats(cat)
+      leftImpurityAgg.add(catStats)
+      rightImpurityAgg.subtract(catStats)
+      leftCount += catStats.getCount
+      rightCount -= catStats.getCount
+      // Compute impurity
+      val leftWeight = leftCount / fullCount
+      val rightWeight = rightCount / fullCount
+      val leftImpurity = leftImpurityAgg.getCalculator.calculate()
+      val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+      val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
+      if (gain > bestGain && gain > metadata.minInfoGain) {
+        bestSplitIndex = sortedCatIndex
+        leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+        bestGain = gain
+      }
+      sortedCatIndex += 1
+    }
+
+    assert(bestSplitIndex != -1, "Unknown error in AltDT split selection for ordered categorical" +
+      s" variable with numSplits = $numSplits.")
+
+    val categoriesForSplit =
+      categoriesSortedByCentroid.slice(0, bestSplitIndex + 1).map(_.toDouble)
+    val bestFeatureSplit =
+      new CategoricalSplit(featureIndex, categoriesForSplit.toArray, featureArity)
+    val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
+    val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
+    val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
+      bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
+    (bestFeatureSplit, bestImpurityStats)
+  }
 
   private[impl] def chooseUnorderedCategoricalSplit(
       featureIndex: Int,
       values: Seq[Double],
       labels: Seq[Double],
-      leftImpurityAgg: ImpurityAggregatorSingle,
-      rightImpurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, ImpurityStats) = ???
+      metadata: AltDTMetadata,
+      featureArity: Int): (Split, ImpurityStats) = ???
 
   /**
    * Choose splitting rule: feature value <= threshold
@@ -413,9 +529,12 @@ private[ml] object AltDT extends Logging {
       featureIndex: Int,
       values: Seq[Double],
       labels: Seq[Double],
-      leftImpurityAgg: ImpurityAggregatorSingle,
-      rightImpurityAgg: ImpurityAggregatorSingle,
-      minInfoGain: Double): (Split, ImpurityStats) = {
+      metadata: AltDTMetadata): (Split, ImpurityStats) = {
+
+    val leftImpurityAgg = metadata.createImpurityAggregator()
+    val rightImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(rightImpurityAgg.update(_, 1.0))
+
     var bestThreshold: Double = Double.NegativeInfinity
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
     var bestGain: Double = 0.0
@@ -432,7 +551,7 @@ private[ml] object AltDT extends Logging {
         val leftImpurity = leftImpurityAgg.getCalculator.calculate()
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-        if (gain > bestGain && gain > minInfoGain) {
+        if (gain > bestGain && gain > metadata.minInfoGain) {
           bestThreshold = currentThreshold
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
@@ -613,6 +732,7 @@ private[ml] object AltDT extends Logging {
           sortedRange.zipWithIndex.map { case ((idx, value), i) =>
             val bit = curBitVector.get(from + i)
             // TODO: In-place merge, rather than general sort.
+            // TODO: We don't actually need to sort the categorical features using our approach.
             (bit, value, idx)
           }.sorted.zipWithIndex.foreach { case ((bit, value, idx), i) =>
             col.values(from + i) = value

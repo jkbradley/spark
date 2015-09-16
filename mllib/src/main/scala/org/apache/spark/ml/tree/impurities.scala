@@ -55,10 +55,16 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
   }
 
   /**
-   * Update stats with the given label.
+   * Update stats with the given label and instance weight.
    * @return This aggregator (modified).
    */
   def update(label: Double, instanceWeight: Double): this.type
+
+  /**
+   * Update stats with the given label.
+   * @return This aggregator (modified).
+   */
+  def update(label: Double): this.type = update(label, 1.0)
 
   /** Get an [[ImpurityCalculator]] for the current stats. */
   def getCalculator: ImpurityCalculator
