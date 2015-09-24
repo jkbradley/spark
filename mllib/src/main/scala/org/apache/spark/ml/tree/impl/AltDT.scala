@@ -205,7 +205,8 @@ private[ml] object AltDT extends Logging {
 
       if (!doneLearning) {
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right.
-        val aggBitVectors: Array[BitSubvector] = collectBitVectors(partitionInfos, bestSplitsAndGains)
+        val aggBitVectors: Array[BitSubvector] =
+          collectBitVectors(partitionInfos, bestSplitsAndGains.map(_._1))
 
         // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
         val aggBitVectorsBc = input.sparkContext.broadcast(aggBitVectors)
@@ -327,14 +328,13 @@ private[ml] object AltDT extends Logging {
    *   Correction: Aggregate only the pieces of that vector corresponding to instances at
    *   active nodes.
    * @param partitionInfos  RDD with feature data, plus current status metadata
-   * @param bestSplitsAndGains  One (split, gain stats) pair per active node
+   * @param bestSplits  Split for each active node
    * @return Array of bit vectors, ordered by offset ranges
    */
   private[impl] def collectBitVectors(
       partitionInfos: RDD[PartitionInfo],
-      bestSplitsAndGains: Array[(Split, ImpurityStats)]): Array[BitSubvector] = {
-    val bestSplitsBc: Broadcast[Array[Split]] =
-      partitionInfos.sparkContext.broadcast(bestSplitsAndGains.map(_._1))
+      bestSplits: Array[Split]): Array[BitSubvector] = {
+    val bestSplitsBc: Broadcast[Array[Split]] = partitionInfos.sparkContext.broadcast(bestSplits)
     val workerBitSubvectors: RDD[Array[BitSubvector]] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
                          activeNodes: BitSet) =>
@@ -360,6 +360,10 @@ private[ml] object AltDT extends Logging {
   }
 
   /**
+   * Choose the best split for a feature at a node.
+   *
+   * TODO: Return null or None when the split is invalid, such as putting all instances on one
+   *       child node.
    *
    * @param col
    * @param labels
@@ -457,8 +461,6 @@ private[ml] object AltDT extends Logging {
         (featureValue, centroid)
       }
     }
-
-    // TODO: RIGHT HERE NOW
 
     logDebug("Centroids for categorical variable: " + centroidsForCategories.mkString(","))
 
