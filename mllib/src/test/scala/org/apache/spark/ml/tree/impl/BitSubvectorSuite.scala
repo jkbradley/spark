@@ -25,25 +25,32 @@ import org.apache.spark.mllib.util.MLlibTestSparkContext
  */
 class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
 
-  test("BitSubvector basic ops") {
+  (() => {
     val from = 1
     val to = 4
     val bs = new BitSubvector(from, to)
-    assert(bs.numBits === to - from)
-    Range(from, to).foreach(x => assert(!bs.get(x)))
     val setVals = Array(from, to - 1)
-    setVals.foreach { x =>
-      bs.set(x)
-      assert(bs.get(x))
+
+    test("basic ops") {
+      assert(bs.numBits === to - from)
+      Range(from, to).foreach(x => assert(!bs.get(x)))
+      setVals.foreach { x =>
+        bs.set(x)
+        assert(bs.get(x))
+      }
+      assert(bs.iterator.toSet === setVals.toSet)
     }
-    assert(bs.iterator.toSet === setVals.toSet)
 
     test("copy") {
       val copyBs = new BitSubvector(from, to)
+      setVals.foreach { x =>
+        bs.set(x)
+        assert(bs.get(x))
+      }
       copyBs.copyBitsFrom(bs)
       assert(copyBs.iterator.toSet === setVals.toSet)
     }
-  }
+  })()
 
   test("BitSubvector merge") {
     val b1 = new BitSubvector(0, 5)
