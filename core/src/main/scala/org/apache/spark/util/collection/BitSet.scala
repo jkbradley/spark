@@ -47,6 +47,16 @@ class BitSet(numBits: Int) extends Serializable {
   }
 
   /**
+   * Copies the bits from another bitset into this bitset, mutating this
+   * bitset in-place. This method assumes both bitsets have the same
+   * numWords.
+   */
+  def copyFrom(other: BitSet): Unit = {
+    require(numWords == other.numWords)
+    System.arraycopy(other.words, 0, words, 0, numWords)
+  }
+
+  /**
    * Compute the bit-wise AND of the two sets returning the
    * result.
    */

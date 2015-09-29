@@ -37,6 +37,12 @@ class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
       assert(bs.get(x))
     }
     assert(bs.iterator.toSet === setVals.toSet)
+
+    test("copy") {
+      val copyBs = new BitSubvector(from, to)
+      copyBs.copyBitsFrom(bs)
+      assert(copyBs.iterator.toSet === setVals.toSet)
+    }
   }
 
   test("BitSubvector merge") {

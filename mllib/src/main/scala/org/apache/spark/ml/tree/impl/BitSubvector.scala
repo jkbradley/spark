@@ -41,6 +41,14 @@ private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializabl
     override def hasNext: Boolean = iter.hasNext
     override def next(): Int = iter.next() - offset + from
   }
+
+  /**
+   * Copies the bits from another BitSubvector, mutating the BitSubvector in-place. This method assumes both
+   * BitSubvectors have the same from and to.
+   */
+  def copyBitsFrom(other: BitSubvector): Unit = {
+    bits.copyFrom(other.bits)
+  }
 }
 
 private[impl] object BitSubvector {
@@ -70,7 +78,8 @@ private[impl] object BitSubvector {
         if (subv.to > newSubvectors(curNewSubvIdx).to) curNewSubvIdx += 1
         val newSubv = newSubvectors(curNewSubvIdx)
         // TODO: More efficient (word-level) copy.
-        subv.iterator.foreach(idx => newSubv.set(idx))
+        // subv.iterator.foreach(idx => newSubv.set(idx))
+        newSubv.copyBitsFrom(subv)
       }
       assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check
       newSubvectors
