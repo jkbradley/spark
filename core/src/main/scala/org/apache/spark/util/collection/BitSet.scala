@@ -228,24 +228,19 @@ class BitSet(numBits: Int) extends Serializable {
     val numWords = bit2words(numBits)
     val wordOffset = offset >> 6
     val bitOffset = offset % 64
-    println(s"numWords: $numWords, wordOffset: $wordOffset, bitOffset: $bitOffset")
-    println(s"this: ${words.toList.map(_.toBinaryString)}, other: ${other.words.toList.map(_.toBinaryString)}")
     while (wordIndex < numWords && wordIndex + wordOffset < other.numWords) {
+      // Mask, shift, and OR with current word
       val maskedShiftedOtherWord = (other.words(wordIndex + wordOffset) & (Long.MaxValue << bitOffset)) >> bitOffset
-      println(s"wordIndex: $wordIndex")
-      println(s"ORing ${words(wordIndex).toBinaryString} with ${maskedShiftedOtherWord.toBinaryString}")
       words(wordIndex) = words(wordIndex) | maskedShiftedOtherWord
 
+      // Fill in higher-order bits from next word if available
       if (bitOffset > 0 && wordIndex + wordOffset + 1 < other.numWords) {
         val leftOffset = 64 - bitOffset
         val maskedShiftedNextWord = (other.words(wordIndex + wordOffset + 1) & (Long.MaxValue >> leftOffset)) << leftOffset
-        println(
-          s"ORing ${words(wordIndex).toBinaryString} " +
-            s"with ${maskedShiftedNextWord.toBinaryString}")
         words(wordIndex) = words(wordIndex) | maskedShiftedNextWord
       }
+
       wordIndex += 1
     }
-    println(s"ending with ${words.toList.map(_.toBinaryString)}")
   }
 }
