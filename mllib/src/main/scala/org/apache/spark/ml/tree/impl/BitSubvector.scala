@@ -52,7 +52,7 @@ private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializabl
   def |=(other: BitSubvector): Unit = {
     require(from <= other.from && to >= other.to)
     val delta = other.from - from
-    bits.orWithOffset(other.bits, delta, math.min(numBits, other.numBits - delta))
+    bits.orWithOffset(other.bits, delta, math.min(numBits - delta, other.numBits))
   }
 
   private def toInternalIdx(idx: Int): Int = {
@@ -90,9 +90,6 @@ private[impl] object BitSubvector {
       sortedSubvectors.foreach { subv =>
         if (subv.to > newSubvectors(curNewSubvIdx).to) curNewSubvIdx += 1
         val newSubv = newSubvectors(curNewSubvIdx)
-        // TODO: More efficient (word-level) copy.>
-//        newSubv.copyBitsFrom(subv)
-//        subv.iterator.foreach(idx => newSubv.set(idx))
         newSubv |= subv
       }
       assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check

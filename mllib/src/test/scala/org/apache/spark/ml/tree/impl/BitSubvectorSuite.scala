@@ -43,10 +43,6 @@ class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
 
     test("|=") {
       val copyBs = new BitSubvector(from, to)
-      setVals.foreach { x =>
-        bs.set(x)
-        assert(bs.get(x))
-      }
       copyBs |= bs
       assert(copyBs.iterator.toSet === setVals.toSet)
     }

@@ -59,10 +59,10 @@ class BitSetSuite extends SparkFunSuite {
       val copyBitset = new BitSet(100)
       copyBitset.orWithOffset(bitset, 5, bitset.capacity - 5)
       for (i <- 5 until 100) {
-        if (setBits.contains(i)) {
-          assert(copyBitset.get(i - 5))
+        if (setBits.contains(i - 5)) {
+          assert(copyBitset.get(i))
         } else {
-          assert(!copyBitset.get(i - 5))
+          assert(!copyBitset.get(i))
         }
       }
     }
@@ -71,10 +71,10 @@ class BitSetSuite extends SparkFunSuite {
       val copyBitset = new BitSet(100)
       copyBitset.orWithOffset(bitset, 65, bitset.capacity - 65)
       for (i <- 65 until 100) {
-        if (setBits.contains(i)) {
-          assert(copyBitset.get(i - 65))
+        if (setBits.contains(i - 65)) {
+          assert(copyBitset.get(i))
         } else {
-          assert(!copyBitset.get(i - 65))
+          assert(!copyBitset.get(i))
         }
       }
     }
