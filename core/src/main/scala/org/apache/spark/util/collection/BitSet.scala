@@ -221,7 +221,31 @@ class BitSet(numBits: Int) extends Serializable {
   private def bit2words(numBits: Int) = ((numBits - 1) >> 6) + 1
 
   /** Shifts other left by offset bits before ORing with this instance and mutating in-place. */
+  // TODO: Add offset in original as well in case the two "from"s are not equal
   private[spark] def orWithOffset(other: BitSet, offset: Int, numBits: Int): Unit = {
-    (this | other).words.zipWithIndex.map { case (v,i) => words(i) = v }
+    // Bit vectors have memory layout [63..0|127..64|...] where | denotes word boundaries
+    var wordIndex = 0
+    val numWords = bit2words(numBits)
+    val wordOffset = offset >> 6
+    val bitOffset = offset % 64
+    println(s"numWords: $numWords, wordOffset: $wordOffset, bitOffset: $bitOffset")
+    println(s"this: ${words.toList.map(_.toBinaryString)}, other: ${other.words.toList.map(_.toBinaryString)}")
+    while (wordIndex < numWords && wordIndex + wordOffset < other.numWords) {
+      val maskedShiftedOtherWord = (other.words(wordIndex + wordOffset) & (Long.MaxValue << bitOffset)) >> bitOffset
+      println(s"wordIndex: $wordIndex")
+      println(s"ORing ${words(wordIndex).toBinaryString} with ${maskedShiftedOtherWord.toBinaryString}")
+      words(wordIndex) = words(wordIndex) | maskedShiftedOtherWord
+
+      if (bitOffset > 0 && wordIndex + wordOffset + 1 < other.numWords) {
+        val leftOffset = 64 - bitOffset
+        val maskedShiftedNextWord = (other.words(wordIndex + wordOffset + 1) & (Long.MaxValue >> leftOffset)) << leftOffset
+        println(
+          s"ORing ${words(wordIndex).toBinaryString} " +
+            s"with ${maskedShiftedNextWord.toBinaryString}")
+        words(wordIndex) = words(wordIndex) | maskedShiftedNextWord
+      }
+      wordIndex += 1
+    }
+    println(s"ending with ${words.toList.map(_.toBinaryString)}")
   }
 }
