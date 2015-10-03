@@ -220,7 +220,8 @@ class BitSet(numBits: Int) extends Serializable {
   /** Return the number of longs it would take to hold numBits. */
   private def bit2words(numBits: Int) = ((numBits - 1) >> 6) + 1
 
+  /** Shifts other left by offset bits before ORing with this instance and mutating in-place. */
   private[spark] def orWithOffset(other: BitSet, offset: Int, numBits: Int): Unit = {
-    ???
+    (this | other).words.zipWithIndex.map { case (v,i) => words(i) = v }
   }
 }
