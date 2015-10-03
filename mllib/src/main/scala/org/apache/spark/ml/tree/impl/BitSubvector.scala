@@ -22,24 +22,27 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.util.collection.BitSet
 
 
+/**
+ * A range of bits within a larger distributed bit vector.
+ * @param from starting index (inclusive) of larger distributed bit vector represented by this instance
+ * @param to ending index (exclusive) of larger distributed bit vector represented by this instance
+ */
 private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializable {
 
   val numBits: Int = to - from
 
-  /** Element i will be put at location i + offset in the BitSet */
-  private val offset: Int = 64 - (numBits % 64)
+  private val bits: BitSet = new BitSet(numBits)
 
-  private val bits: BitSet = new BitSet(numBits + offset)
+  /** Set a bit in this instance using an external index */
+  def set(idx: Int): Unit = bits.set(toInternalIdx(idx))
 
-  def set(bit: Int): Unit = bits.set(bit + offset - from)
+  def get(idx: Int): Boolean = bits.get(toInternalIdx(idx))
 
-  def get(bit: Int): Boolean = bits.get(bit + offset - from)
-
-  /** Get an iterator over the set bits. */
+  /** Get an iterator over the external indices of the set bits. */
   def iterator: Iterator[Int] = new Iterator[Int] {
     val iter = bits.iterator
     override def hasNext: Boolean = iter.hasNext
-    override def next(): Int = iter.next() - offset + from
+    override def next(): Int = toExternalIdx(iter.next())
   }
 
   /**
@@ -48,6 +51,14 @@ private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializabl
    */
   def copyBitsFrom(other: BitSubvector): Unit = {
     bits.copyFrom(other.bits)
+  }
+
+  private def toInternalIdx(idx: Int): Int = {
+    require(idx >= from && idx < to)
+    idx - from
+  }
+  private def toExternalIdx(idx: Int): Int = {
+    idx + from
   }
 }
 
@@ -77,8 +88,9 @@ private[impl] object BitSubvector {
       sortedSubvectors.foreach { subv =>
         if (subv.to > newSubvectors(curNewSubvIdx).to) curNewSubvIdx += 1
         val newSubv = newSubvectors(curNewSubvIdx)
-        // TODO: More efficient (word-level) copy.
-        newSubv.copyBitsFrom(subv)
+        // TODO: More efficient (word-level) copy.>
+//        newSubv.copyBitsFrom(subv)
+        subv.iterator.foreach(idx => newSubv.set(idx))
       }
       assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check
       newSubvectors
