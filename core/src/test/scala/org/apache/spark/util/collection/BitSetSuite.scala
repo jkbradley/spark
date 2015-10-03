@@ -43,8 +43,8 @@ class BitSetSuite extends SparkFunSuite {
       assert(bitset.cardinality() === setBits.size)
     }
 
-    test("copyFrom") {
-      copyBitset.copyFrom(bitset)
+    test("orWithOffset") {
+      copyBitset.orWithOffset(bitset, 0, bitset.capacity / 64)
       for (i <- 0 until 100) {
         if (setBits.contains(i)) {
           assert(copyBitset.get(i))

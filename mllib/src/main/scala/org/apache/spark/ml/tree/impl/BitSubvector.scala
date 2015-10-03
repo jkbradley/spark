@@ -46,11 +46,13 @@ private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializabl
   }
 
   /**
-   * Copies the bits from another BitSubvector, mutating the BitSubvector in-place. This method assumes both
-   * BitSubvectors have the same from and to.
+   * Bit-wise OR with another BitSubvector. Bits are matched according to external index (ORed against 0 if absent in
+   * the other BitSubvector). This method mutates the current instance in-place.
    */
-  def copyBitsFrom(other: BitSubvector): Unit = {
-    bits.copyFrom(other.bits)
+  def |=(other: BitSubvector): Unit = {
+    require(from <= other.from && to >= other.to)
+    val delta = other.from - from
+    bits.orWithOffset(other.bits, delta, math.min(numBits, other.numBits - delta))
   }
 
   private def toInternalIdx(idx: Int): Int = {
@@ -90,7 +92,8 @@ private[impl] object BitSubvector {
         val newSubv = newSubvectors(curNewSubvIdx)
         // TODO: More efficient (word-level) copy.>
 //        newSubv.copyBitsFrom(subv)
-        subv.iterator.foreach(idx => newSubv.set(idx))
+//        subv.iterator.foreach(idx => newSubv.set(idx))
+        newSubv |= subv
       }
       assert(curNewSubvIdx + 1 == newSubvectors.length) // sanity check
       newSubvectors

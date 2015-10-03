@@ -47,16 +47,6 @@ class BitSet(numBits: Int) extends Serializable {
   }
 
   /**
-   * Copies the bits from another bitset into this bitset, mutating this
-   * bitset in-place. This method assumes both bitsets have the same
-   * numWords.
-   */
-  def copyFrom(other: BitSet): Unit = {
-    require(numWords == other.numWords)
-    System.arraycopy(other.words, 0, words, 0, numWords)
-  }
-
-  /**
    * Compute the bit-wise AND of the two sets returning the
    * result.
    */
@@ -229,4 +219,8 @@ class BitSet(numBits: Int) extends Serializable {
 
   /** Return the number of longs it would take to hold numBits. */
   private def bit2words(numBits: Int) = ((numBits - 1) >> 6) + 1
+
+  private[spark] def orWithOffset(other: BitSet, offset: Int, numBits: Int): Unit = {
+    ???
+  }
 }
