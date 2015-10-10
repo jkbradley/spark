@@ -41,51 +41,22 @@ class BitSetSuite extends SparkFunSuite {
     assert(bitset.cardinality() === setBits.size)
   }
 
-  test("orWithOffset offset=0") {
+  test("orWithOffset") {
     val setBits = Seq(0, 9, 1, 10, 90, 96)
     val bitset = new BitSet(100)
     setBits.foreach(i => bitset.set(i))
 
-    val copyBitset = new BitSet(100)
-    copyBitset.orWithOffset(bitset, 0)
-    for (i <- 0 until 100) {
-      if (setBits.contains(i)) {
-        assert(copyBitset.get(i))
-      } else {
-        assert(!copyBitset.get(i))
-      }
-    }
-    assert(copyBitset.cardinality() === setBits.size)
-  }
-
-  test("orWithOffset offset=5") {
-    val setBits = Seq(0, 9, 1, 10, 90, 96)
-    val bitset = new BitSet(100)
-    setBits.foreach(i => bitset.set(i))
-
-    val copyBitset = new BitSet(100)
-    copyBitset.orWithOffset(bitset, 5)
-    for (i <- 5 until 100) {
-      if (setBits.contains(i - 5)) {
-        assert(copyBitset.get(i))
-      } else {
-        assert(!copyBitset.get(i))
-      }
-    }
-  }
-
-  test("orWithOffset offset=65 (full word + 1)") {
-    val setBits = Seq(0, 9, 1, 10, 90, 96)
-    val bitset = new BitSet(100)
-    setBits.foreach(i => bitset.set(i))
-
-    val copyBitset = new BitSet(100)
-    copyBitset.orWithOffset(bitset, 65)
-    for (i <- 65 until 100) {
-      if (setBits.contains(i - 65)) {
-        assert(copyBitset.get(i))
-      } else {
-        assert(!copyBitset.get(i))
+    for {
+      offset <- Seq(0, 1, 63, 64, 65)
+    } {
+      val copyBitset = new BitSet(100)
+      copyBitset.orWithOffset(bitset, offset)
+      for (i <- offset until 100) {
+        if (setBits.contains(i - offset)) {
+          assert(copyBitset.get(i))
+        } else {
+          assert(!copyBitset.get(i))
+        }
       }
     }
   }
