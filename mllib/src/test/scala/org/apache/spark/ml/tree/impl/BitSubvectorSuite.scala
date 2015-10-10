@@ -25,7 +25,7 @@ import org.apache.spark.mllib.util.MLlibTestSparkContext
  */
 class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
 
-  test("basic ops") {
+  test("basic set and get") {
     val from = 1
     val to = 4
     val bs = new BitSubvector(from, to)
@@ -52,7 +52,7 @@ class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
     assert(copyBs.iterator.toSet === setVals.toSet)
   }
 
-  test("BitSubvector merge") {
+  test("merge") {
     val b1 = new BitSubvector(0, 5)
     b1.set(1)
     val b2 = new BitSubvector(5, 7)
@@ -76,7 +76,7 @@ class BitSubvectorSuite extends SparkFunSuite with MLlibTestSparkContext {
     }
   }
 
-  test("BitSubvector merge with empty BitSubvectors") {
+  test("merge with empty BitSubvectors") {
     val parts = BitSubvector.merge(Array.empty[BitSubvector], Array.empty[BitSubvector])
   }
 }

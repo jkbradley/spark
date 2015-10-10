@@ -21,7 +21,7 @@ import org.apache.spark.SparkFunSuite
 
 class BitSetSuite extends SparkFunSuite {
 
-  test("set and get") {
+  test("basic set and get") {
     val setBits = Seq(0, 9, 1, 10, 90, 96)
     val bitset = new BitSet(100)
 
