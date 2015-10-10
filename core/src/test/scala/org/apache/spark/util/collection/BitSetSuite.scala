@@ -44,7 +44,7 @@ class BitSetSuite extends SparkFunSuite {
 
     test("orWithOffset offset=0") {
       val copyBitset = new BitSet(100)
-      copyBitset.orWithOffset(bitset, 0, bitset.capacity)
+      copyBitset.orWithOffset(bitset, 0)
       for (i <- 0 until 100) {
         if (setBits.contains(i)) {
           assert(copyBitset.get(i))
@@ -57,7 +57,7 @@ class BitSetSuite extends SparkFunSuite {
 
     test("orWithOffset offset=5") {
       val copyBitset = new BitSet(100)
-      copyBitset.orWithOffset(bitset, 5, bitset.capacity - 5)
+      copyBitset.orWithOffset(bitset, 5)
       for (i <- 5 until 100) {
         if (setBits.contains(i - 5)) {
           assert(copyBitset.get(i))
@@ -69,7 +69,7 @@ class BitSetSuite extends SparkFunSuite {
 
     test("orWithOffset offset=65 (full word + 1)") {
       val copyBitset = new BitSet(100)
-      copyBitset.orWithOffset(bitset, 65, bitset.capacity - 65)
+      copyBitset.orWithOffset(bitset, 65)
       for (i <- 65 until 100) {
         if (setBits.contains(i - 65)) {
           assert(copyBitset.get(i))

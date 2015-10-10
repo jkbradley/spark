@@ -52,7 +52,7 @@ private[impl] class BitSubvector(val from: Int, val to: Int) extends Serializabl
   def |=(other: BitSubvector): Unit = {
     require(from <= other.from && to >= other.to)
     val delta = other.from - from
-    bits.orWithOffset(other.bits, delta, math.min(numBits - delta, other.numBits))
+    bits.orWithOffset(other.bits, delta)
   }
 
   private def toInternalIdx(idx: Int): Int = {

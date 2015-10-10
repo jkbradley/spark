@@ -220,26 +220,33 @@ class BitSet(numBits: Int) extends Serializable {
   /** Return the number of longs it would take to hold numBits. */
   private def bit2words(numBits: Int) = ((numBits - 1) >> 6) + 1
 
-  /** Bit-wise OR between two BitSets where the ith bit of other is ORed against the i+offset bit of this instance. */
-  private[spark] def orWithOffset(other: BitSet, offset: Int, numBits: Int): Unit = {
-    val numWords = bit2words(numBits)
+  /**
+   * Bit-wise OR between two BitSets where the ith bit of other is ORed against the i+offset bit of this instance. For
+   * performance, the OR is computed word-by-word rather than bit-by-bit.
+   *
+   * This function mutates the current BitSet instance (i.e. not `other`).
+   *
+   * @param offset the amount to left-shift (with zero padding) `other` before performing the OR, must be >= 0.
+   */
+  private[spark] def orWithOffset(other: BitSet, offset: Int): Unit = {
+    val numWords = bit2words(math.min(this.capacity, other.capacity - offset))
     val wordOffset = offset >> 6 // divide by 64
 
     // Bit vectors have memory layout [63..0|127..64|...] where | denotes word boundaries, so left/right within a word
     // and left/right across words are flipped
-    val rightOffset = offset % 64
-    val leftOffset = 64 - rightOffset
+    val rightOffset = offset & 0x3f // mod 64
+    val leftOffset = (64 - rightOffset)  & 0x3f // mod 64
 
     var wordIndex = 0
     while (wordIndex < numWords) {
       // Fill in lowest-order bits from other's previous word's highest-order bits if available
       if (rightOffset > 0 && wordIndex > 0) {
-        val maskedShiftedPrevWord = (other.words(wordIndex - 1) & (Long.MaxValue << leftOffset)) >> leftOffset
+        val maskedShiftedPrevWord = (other.words(wordIndex - 1) & (-1L << leftOffset)) >> leftOffset
         words(wordIndex + wordOffset) = words(wordIndex + wordOffset) | maskedShiftedPrevWord
       }
 
       // Mask, shift, and OR with current word
-      val maskedShiftedOtherWord = (other.words(wordIndex) & (Long.MaxValue >> rightOffset)) << rightOffset
+      val maskedShiftedOtherWord = (other.words(wordIndex) & (-1L >> rightOffset)) << rightOffset
       words(wordIndex + wordOffset) = words(wordIndex + wordOffset) | maskedShiftedOtherWord
 
       wordIndex += 1
