@@ -152,7 +152,10 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   test("chooseSplit") {
   }
 
-  test("chooseOrderedCategoricalSplit") {
+  test("chooseOrderedCategoricalSplit: basic case") {
+  }
+
+  test("chooseOrderedCategoricalSplit: return bad split if best split is on end") {
   }
 
   //  test("chooseUnorderedCategoricalSplit") { }
@@ -165,7 +168,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
     val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, labels, metadata)
     split match {
-      case s: ContinuousSplit =>
+      case Some(s: ContinuousSplit) =>
         assert(s.featureIndex === featureIndex)
         assert(s.threshold === 0.2)
       case _ =>
@@ -180,9 +183,6 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(stats.leftImpurityCalculator.stats === Array(2.0, 0.0))
     assert(stats.rightImpurityCalculator.stats === Array(0.0, 3.0))
     assert(stats.valid)
-  }
-
-  test("chooseContinuousSplit: some equal values") {
   }
 
   // TODO: Add this test once we make this change.
@@ -232,7 +232,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = 0.5)
-    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(bestSplit))
+    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(Some(bestSplit)))
     assert(bitVectors.length === 1)
     val bitv = bitVectors.head
     assert(bitv.numBits === numRows)
@@ -248,7 +248,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = -2.0)
-    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(bestSplit))
+    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(Some(bestSplit)))
     assert(bitVectors.length === 1)
     val bitv = bitVectors.head
     assert(bitv.numBits === numRows)
