@@ -137,8 +137,6 @@ private[ml] object AltDT extends Logging {
     //       rather than 1 copy per worker.  This means a lot of random accesses.
     //       We could improve this by applying first-level sorting (by node) to labels.
 
-    // TODO: RIGHT HERE NOW: JUST ADDED ISUNORDERED
-
     // Sort each column by feature values.
     val colStore: RDD[FeatureVector] = colStoreInit.map { case (featureIndex: Int, col: Vector) =>
       val featureArity: Int = strategy.categoricalFeaturesInfo.getOrElse(featureIndex, 0)
@@ -293,9 +291,11 @@ private[ml] object AltDT extends Logging {
    * On driver: Grow tree based on chosen splits, and compute new set of active nodes.
    * @param oldPeriphery  Old periphery of active nodes.
    * @param bestSplitsAndGains  Best (split, gain) pairs, which can be zipped with the old
-   *                            periphery.
+   *                            periphery.  These stats will be used to replace the stats in
+   *                            any nodes which are split.
    * @param minInfoGain  Threshold for min info gain required to split a node.
-   * @return  New active node periphery
+   * @return  New active node periphery.
+   *          If a node is split, then this method will update its fields.
    */
   private[impl] def computeActiveNodePeriphery(
       oldPeriphery: Array[LearningNode],
@@ -482,12 +482,13 @@ private[ml] object AltDT extends Logging {
 
     var bestSplitIndex: Int = -1  // index into categoriesSortedByCentroid
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
-    var bestGain: Double = -1.0
+    var bestGain: Double = 0.0
     val fullImpurity = rightImpurityAgg.getCalculator.calculate()
     var leftCount: Double = 0.0
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
 
+    // Consider all splits. These only cover valid splits, with at least one category on each side.
     val numSplits = categoriesSortedByCentroid.length - 1
     var sortedCatIndex = 0
     while (sortedCatIndex < numSplits) {
@@ -512,9 +513,6 @@ private[ml] object AltDT extends Logging {
       sortedCatIndex += 1
     }
 
-    assert(bestSplitIndex != -1, "Unknown error in AltDT split selection for ordered categorical" +
-      s" variable with numSplits = $numSplits.")
-
     val categoriesForSplit =
       categoriesSortedByCentroid.slice(0, bestSplitIndex + 1).map(_.toDouble)
     val bestFeatureSplit =
@@ -524,7 +522,7 @@ private[ml] object AltDT extends Logging {
     val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
       bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
 
-    if (bestSplitIndex == 0 || bestSplitIndex == categoriesSortedByCentroid.length - 1) {
+    if (bestSplitIndex == -1 || bestGain == 0.0) {
       (None, bestImpurityStats)
     } else {
       (Some(bestFeatureSplit), bestImpurityStats)

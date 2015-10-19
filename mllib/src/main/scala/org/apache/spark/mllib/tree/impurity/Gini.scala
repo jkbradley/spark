@@ -162,4 +162,8 @@ private[spark] class GiniCalculator(stats: Array[Double]) extends ImpurityCalcul
 
   override def toString: String = s"GiniCalculator(stats = [${stats.mkString(", ")}])"
 
+  private[spark] def exactlyEquals(other: ImpurityCalculator): Boolean = other match {
+    case o: GiniCalculator => stats.sameElements(other.stats)
+    case _ => false
+  }
 }

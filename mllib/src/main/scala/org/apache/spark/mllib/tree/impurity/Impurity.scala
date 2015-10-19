@@ -185,4 +185,6 @@ private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) exten
     result._1
   }
 
+  /** Test exact equality */
+  private[spark] def exactlyEquals(other: ImpurityCalculator): Boolean
 }
