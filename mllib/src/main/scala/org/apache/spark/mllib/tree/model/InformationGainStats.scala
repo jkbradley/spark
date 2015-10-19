@@ -88,6 +88,7 @@ private[spark] object InformationGainStats {
  * @param rightImpurityCalculator impurity statistics for right child node
  * @param valid whether the current split satisfies minimum info gain or
  *              minimum number of instances per node
+ *              TODO: Can we remove this?  Not sure if this is used anywhere...
  */
 @DeveloperApi
 private[spark] class ImpurityStats(
@@ -113,6 +114,15 @@ private[spark] class ImpurityStats(
     rightImpurityCalculator.calculate()
   } else {
     -1.0
+  }
+
+  /** Test exact equality */
+  private[spark] def exactlyEquals(other: ImpurityStats): Boolean = {
+    gain == other.gain && impurity == other.impurity &&
+      impurityCalculator.exactlyEquals(other.impurityCalculator) &&
+      leftImpurityCalculator.exactlyEquals(other.leftImpurityCalculator) &&
+      rightImpurityCalculator.exactlyEquals(other.rightImpurityCalculator) &&
+      valid == other.valid
   }
 }
 

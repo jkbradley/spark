@@ -275,10 +275,8 @@ private[tree] class LearningNode(
         // Here we want to keep same behavior with the old mllib.DecisionTreeModel
         new LeafNode(stats.impurityCalculator.predict, -1.0, stats.impurityCalculator)
       }
-
     }
   }
-
 }
 
 private[tree] object LearningNode {
@@ -292,8 +290,8 @@ private[tree] object LearningNode {
   }
 
   /** Create an empty node with the given node index.  Values must be set later on. */
-  def emptyNode(nodeIndex: Int): LearningNode = {
-    new LearningNode(nodeIndex, None, None, None, false, null)
+  def emptyNode(id: Int): LearningNode = {
+    new LearningNode(id, None, None, None, false, null)
   }
 
   // The below indexing methods were copied from spark.mllib.tree.model.Node
