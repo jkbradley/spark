@@ -19,12 +19,13 @@ package org.apache.spark.ml.tree.impl
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.regression.DecisionTreeRegressor
-import org.apache.spark.ml.tree.{LeafNode, InternalNode, ContinuousSplit}
+import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.AltDT.{AltDTMetadata, FeatureVector, PartitionInfo}
 import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.{SparseVector, Vector, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.tree.impurity.{Variance, Gini, Entropy, Impurity}
+import org.apache.spark.mllib.tree.impurity._
+import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.util.collection.BitSet
 
@@ -44,7 +45,6 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
       .setMaxDepth(10)
       .setAlgorithm("byCol")
     val model = dt.fit(df)
-    println(model.toDebugString) // TODO: remove println
     assert(model.rootNode.isInstanceOf[InternalNode])
     val root = model.rootNode.asInstanceOf[InternalNode]
     assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[LeafNode])
@@ -61,7 +61,6 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
       .setMaxDepth(10)
       .setAlgorithm("byCol")
     val model = dt.fit(df)
-    println(model.toDebugString) // TODO: remove println
     assert(model.rootNode.isInstanceOf[InternalNode])
     val root = model.rootNode.asInstanceOf[InternalNode]
     assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[InternalNode])
@@ -147,18 +146,94 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   //////////////////////////////// Choosing splits //////////////////////////////////
 
   test("computeBestSplits") {
+    // TODO
   }
 
-  test("chooseSplit") {
+  test("chooseSplit: choose correct type of split") {
+    val labels = Seq(0, 0, 0, 1, 1, 1, 1).map(_.toDouble).toArray
+    val fromOffset = 1
+    val toOffset = 4
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+
+    val col1 = FeatureVector.fromOriginal(featureIndex = 0, featureArity = 0,
+      featureVector = Vectors.dense(0.8, 0.1, 0.1, 0.2, 0.3, 0.5, 0.6))
+    val (split1, _) = AltDT.chooseSplit(col1, labels, fromOffset, toOffset, metadata)
+    assert(split1.nonEmpty && split1.get.isInstanceOf[ContinuousSplit])
+
+    val col2 = FeatureVector.fromOriginal(featureIndex = 0, featureArity = 3,
+      featureVector = Vectors.dense(0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0))
+    val (split2, _) = AltDT.chooseSplit(col2, labels, fromOffset, toOffset, metadata)
+    assert(split2.nonEmpty && split2.get.isInstanceOf[CategoricalSplit])
   }
 
   test("chooseOrderedCategoricalSplit: basic case") {
+    val featureIndex = 0
+    val values = Seq(0, 0, 1, 2, 2, 2, 2).map(_.toDouble)
+    val featureArity = values.max.toInt + 1
+
+    def testHelper(
+        labels: Seq[Double],
+        expectedLeftCategories: Array[Double],
+        expectedLeftStats: Array[Double],
+        expectedRightStats: Array[Double]): Unit = {
+      val expectedRightCategories = Range(0, featureArity)
+        .filter(c => !expectedLeftCategories.contains(c)).map(_.toDouble).toArray
+      val impurity = Entropy
+      val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+      val (split, stats) =
+        AltDT.chooseOrderedCategoricalSplit(featureIndex, values, labels, metadata, featureArity)
+      split match {
+        case Some(s: CategoricalSplit) =>
+          assert(s.featureIndex === featureIndex)
+          assert(s.leftCategories === expectedLeftCategories)
+          assert(s.rightCategories === expectedRightCategories)
+        case _ =>
+          throw new AssertionError(
+            s"Expected CategoricalSplit but got ${split.getClass.getSimpleName}")
+      }
+      val fullImpurityStatsArray =
+        Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+      val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+      assert(stats.gain === fullImpurity)
+      assert(stats.impurity === fullImpurity)
+      assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+      assert(stats.leftImpurityCalculator.stats === expectedLeftStats)
+      assert(stats.rightImpurityCalculator.stats === expectedRightStats)
+      assert(stats.valid)
+    }
+
+    val labels1 = Seq(0, 0, 1, 1, 1, 1, 1).map(_.toDouble)
+    testHelper(labels1, Array(0.0), Array(2.0, 0.0), Array(0.0, 5.0))
+
+    val labels2 = Seq(0, 0, 0, 1, 1, 1, 1).map(_.toDouble)
+    testHelper(labels2, Array(0.0, 1.0), Array(3.0, 0.0), Array(0.0, 4.0))
   }
 
-  test("chooseOrderedCategoricalSplit: return bad split if best split is on end") {
+  test("chooseOrderedCategoricalSplit: return bad split if we should not split") {
+    val featureIndex = 0
+    val values = Seq(0, 0, 1, 2, 2, 2, 2).map(_.toDouble)
+    val featureArity = values.max.toInt + 1
+
+    val labels = Seq(1, 1, 1, 1, 1, 1, 1).map(_.toDouble)
+
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+    val (split, stats) =
+      AltDT.chooseOrderedCategoricalSplit(featureIndex, values, labels, metadata, featureArity)
+    assert(split.isEmpty)
+    val fullImpurityStatsArray =
+      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+    assert(stats.gain === 0.0)
+    assert(stats.impurity === fullImpurity)
+    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+    assert(stats.valid)
   }
 
-  //  test("chooseUnorderedCategoricalSplit") { }
+  //  test("chooseUnorderedCategoricalSplit: basic case") { }
+
+  //  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") { }
 
   test("chooseContinuousSplit: basic case") {
     val featureIndex = 0
@@ -175,7 +250,8 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
         throw new AssertionError(
           s"Expected ContinuousSplit but got ${split.getClass.getSimpleName}")
     }
-    val fullImpurityStatsArray = Array(2.0, 3.0)
+    val fullImpurityStatsArray =
+      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
     val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
     assert(stats.gain === fullImpurity)
     assert(stats.impurity === fullImpurity)
@@ -185,8 +261,23 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(stats.valid)
   }
 
-  // TODO: Add this test once we make this change.
-  // test("chooseContinuousSplit: return bad split if best split is on end") { }
+  test("chooseContinuousSplit: return bad split if we should not split") {
+    val featureIndex = 0
+    val values = Seq(0.1, 0.2, 0.3, 0.4, 0.5)
+    val labels = Seq(0.0, 0.0, 0.0, 0.0, 0.0)
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+    val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, labels, metadata)
+    // split should be None
+    assert(split.isEmpty)
+    // stats for parent node should be correct
+    val fullImpurityStatsArray =
+      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+    assert(stats.gain === 0.0)
+    assert(stats.impurity === fullImpurity)
+    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+  }
 
   //////////////////////////////// Bit subvectors //////////////////////////////////
 
@@ -258,6 +349,55 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   //////////////////////////////// Active nodes //////////////////////////////////
 
   test("computeActiveNodePeriphery") {
-  }
+    // old periphery: 2 nodes
+    val left = LearningNode.emptyNode(id = 1)
+    val right = LearningNode.emptyNode(id = 2)
+    val oldPeriphery: Array[LearningNode] = Array(left, right)
+    // bestSplitsAndGains: Do not split left, but split right node.
+    val lCalc = new EntropyCalculator(Array(8.0, 1.0))
+    val lStats = new ImpurityStats(0.0, lCalc.calculate(),
+      lCalc, lCalc, new EntropyCalculator(Array(0.0, 0.0)))
 
+    val rSplit = new ContinuousSplit(featureIndex = 1, threshold = 0.6)
+    val rCalc = new EntropyCalculator(Array(5.0, 7.0))
+    val rRightChildCalc = new EntropyCalculator(Array(1.0, 5.0))
+    val rLeftChildCalc = new EntropyCalculator(Array(
+      rCalc.stats(0) - rRightChildCalc.stats(0),
+      rCalc.stats(1) - rRightChildCalc.stats(1)))
+    val rGain = {
+      val rightWeight = rRightChildCalc.stats.sum / rCalc.stats.sum
+      val leftWeight = rLeftChildCalc.stats.sum / rCalc.stats.sum
+      rCalc.calculate() -
+        rightWeight * rRightChildCalc.calculate() - leftWeight * rLeftChildCalc.calculate()
+    }
+    val rStats =
+      new ImpurityStats(rGain, rCalc.calculate(), rCalc, rLeftChildCalc, rRightChildCalc)
+
+    val bestSplitsAndGains: Array[(Option[Split], ImpurityStats)] =
+      Array((None, lStats), (Some(rSplit), rStats))
+
+    // Test A: Split right node
+    val newPeriphery1: Array[LearningNode] =
+      AltDT.computeActiveNodePeriphery(oldPeriphery, bestSplitsAndGains, minInfoGain = 0.0)
+    // Expect 2 active nodes
+    assert(newPeriphery1.length === 2)
+    // Confirm right node was updated
+    assert(right.split.get === rSplit)
+    assert(!right.isLeaf)
+    assert(right.stats.exactlyEquals(rStats))
+    assert(right.leftChild.nonEmpty && right.leftChild.get === newPeriphery1(0))
+    assert(right.rightChild.nonEmpty && right.rightChild.get === newPeriphery1(1))
+    // Confirm new active nodes have stats but no children
+    assert(newPeriphery1(0).leftChild.isEmpty && newPeriphery1(0).rightChild.isEmpty &&
+      newPeriphery1(0).split.isEmpty &&
+      newPeriphery1(0).stats.impurityCalculator.exactlyEquals(rLeftChildCalc))
+    assert(newPeriphery1(1).leftChild.isEmpty && newPeriphery1(1).rightChild.isEmpty &&
+      newPeriphery1(1).split.isEmpty &&
+      newPeriphery1(1).stats.impurityCalculator.exactlyEquals(rRightChildCalc))
+
+    // Test B: Increase minInfoGain, so split nothing
+    val newPeriphery2: Array[LearningNode] =
+      AltDT.computeActiveNodePeriphery(oldPeriphery, bestSplitsAndGains, minInfoGain = 1000.0)
+    assert(newPeriphery2.isEmpty)
+  }
 }

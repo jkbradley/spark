@@ -136,4 +136,8 @@ private[spark] class VarianceCalculator(stats: Array[Double]) extends ImpurityCa
     s"VarianceAggregator(cnt = ${stats(0)}, sum = ${stats(1)}, sum2 = ${stats(2)})"
   }
 
+  private[spark] def exactlyEquals(other: ImpurityCalculator): Boolean = other match {
+    case o: VarianceCalculator => stats.sameElements(other.stats)
+    case _ => false
+  }
 }

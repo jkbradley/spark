@@ -143,7 +143,7 @@ private[ml] object RandomForest extends Logging {
     rng.setSeed(seed)
 
     // Allocate and queue root nodes.
-    val topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(nodeIndex = 1))
+    val topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(id = 1))
     Range(0, numTrees).foreach(treeIndex => nodeQueue.enqueue((treeIndex, topNodes(treeIndex))))
 
     while (nodeQueue.nonEmpty) {
