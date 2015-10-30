@@ -375,7 +375,6 @@ private[ml] object AltDT extends Logging {
 
   /**
    * Choose the best split for a feature at a node.
-   *
    * TODO: Return null or None when the split is invalid, such as putting all instances on one
    *       child node.
    *
@@ -433,10 +432,15 @@ private[ml] object AltDT extends Logging {
     // TODO: Support high-arity features by using a single array to hold the stats.
 
     // aggStats(category) = label statistics for category
-    val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
+    val aggStats: Array[ImpurityAggregatorSingle] = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    values.zip(labels).foreach { case (cat, label) =>
+    var i = 0
+    val len = values.length
+    while (i < len) {
+      val cat = values(i)
+      val label = labels(i)
       aggStats(cat.toInt).update(label)
+      i += 1
     }
 
     // Compute centroids.  centroidsForCategories is a list: (category, centroid)
@@ -484,9 +488,14 @@ private[ml] object AltDT extends Logging {
     val categoriesSortedByCentroid: List[Int] = centroidsForCategories.toList.sortBy(_._2).map(_._1)
 
     // Cumulative sums of bin statistics for left, right parts of split.
-    val leftImpurityAgg = metadata.createImpurityAggregator()
-    val rightImpurityAgg = metadata.createImpurityAggregator()
-    aggStats.foreach(rightImpurityAgg.add)
+    val leftImpurityAgg: ImpurityAggregatorSingle = metadata.createImpurityAggregator()
+    val rightImpurityAgg: ImpurityAggregatorSingle = metadata.createImpurityAggregator()
+    var j = 0
+    val length = aggStats.length
+    while (j < length) {
+      rightImpurityAgg.add(aggStats(j))
+      j += 1
+    }
 
     var bestSplitIndex: Int = -1  // index into categoriesSortedByCentroid
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
@@ -558,7 +567,12 @@ private[ml] object AltDT extends Logging {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
-    labels.foreach(rightImpurityAgg.update(_, 1.0))
+    var i = 0
+    val len = labels.length
+    while (i < len) {
+      rightImpurityAgg.update(labels(i), 1.0)
+      i += 1
+    }
 
     var bestThreshold: Double = Double.NegativeInfinity
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
@@ -568,7 +582,11 @@ private[ml] object AltDT extends Logging {
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
-    values.zip(labels).foreach { case (value, label) =>
+    var j = 0
+    val length = values.length
+    while (j < length) {
+      val value = values(j)
+      val label = labels(j)
       if (value != currentThreshold) {
         // Check gain
         val leftWeight = leftCount / fullCount
@@ -588,6 +606,7 @@ private[ml] object AltDT extends Logging {
       rightImpurityAgg.update(label, -1.0)
       leftCount += 1.0
       rightCount -= 1.0
+      j += 1
     }
 
     val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
