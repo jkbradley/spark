@@ -48,14 +48,8 @@ private[tree] object TreeUtil {
    *       (First collect stats to decide how to partition.)
    * TODO: Move elsewhere in MLlib.
    */
-  def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Vector)] = {
+  def rowToColumnStoreDense(rowStore: RDD[Vector], numRows: Int): RDD[(Int, Vector)] = {
 
-    val numRows = {
-      val longNumRows: Long = rowStore.count()
-      require(longNumRows < Int.MaxValue, s"rowToColumnStore given RDD with $longNumRows rows," +
-        s" but can handle at most ${Int.MaxValue} rows")
-      longNumRows.toInt
-    }
     if (numRows == 0) {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
