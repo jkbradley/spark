@@ -28,6 +28,8 @@ import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.util.collection.BitSet
 
+import scala.util.Random
+
 /**
  * Test suite for [[AltDT]].
  */
@@ -70,6 +72,39 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   }
 
   //////////////////////////////// Helper classes //////////////////////////////////
+
+  test("DualPivotQuicksort: sort array") {
+    val r = new Random()
+    val len = 1000
+    val doubles = Array.fill[Double](len)(r.nextDouble)
+    val idxs = Array.fill[Int](len)(r.nextInt(len))
+
+    val (sortedDoubles, sortedIdxs) = doubles.zip(idxs).sorted.unzip
+    DualPivotQuicksort.sort(doubles, idxs)
+
+    assert(sortedDoubles.sameElements(doubles))
+    assert(sortedIdxs.sameElements(idxs))
+  }
+
+  test("DualPivotQuicksort: sort sub-arrays") {
+    val r = new Random()
+    val len = 1000
+    val partition = r.nextInt(len) // partition point between the two sub-arrays
+    val doubles = Array.fill[Double](len)(r.nextDouble)
+    val idxs = Array.fill[Int](len)(r.nextInt(len))
+
+    val (sortedLeftDoubles, sortedLeftIdxs) = doubles.slice(0, partition).zip(idxs.slice(0, partition)).sorted.unzip
+    val (sortedRightDoubles, sortedRightIdxs) = doubles.slice(partition, len).zip(idxs.slice(partition, len)).sorted.unzip
+
+    val sortedDoubles = sortedLeftDoubles ++ sortedRightDoubles
+    val sortedIdxs = sortedLeftIdxs ++ sortedRightIdxs
+
+    DualPivotQuicksort.sort(doubles, idxs, 0, partition - 1)
+    DualPivotQuicksort.sort(doubles, idxs, partition, len - 1)
+
+    assert(sortedDoubles.sameElements(doubles))
+    assert(sortedIdxs.sameElements(idxs))
+  }
 
   test("FeatureVector") {
     val v = new FeatureVector(1, 0, Array(0.1, 0.3, 0.7), Array(1, 2, 0))

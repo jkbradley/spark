@@ -195,7 +195,8 @@ private[ml] object AltDT extends Logging {
       if (!doneLearning) {
         val splits: Array[Option[Split]] = bestSplitsAndGains.map(_._1)
         // construct bit vector encoding which active nodes found a split
-        val nodeSplitBitVector: BitSet = splits.zipWithIndex.foldLeft(new BitSet(splits.length))  { (acc: BitSet, splitAndIdx: (Option[Split], Int)) =>
+        val nodeSplitBitVector: BitSet = splits.zipWithIndex.foldLeft(new BitSet(splits.length))  {
+          (acc: BitSet, splitAndIdx: (Option[Split], Int)) =>
           if (splitAndIdx._1.isDefined)
             acc.set(splitAndIdx._2)
           acc
@@ -203,18 +204,11 @@ private[ml] object AltDT extends Logging {
 
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right.
         val aggBitVector: BitSet = aggregateBitVector(partitionInfos, splits, numRows)
-
-        // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
-        val aggBitVectorBc = input.sparkContext.broadcast(aggBitVector)
-        val nodeSplitBitVectorBc = input.sparkContext.broadcast(nodeSplitBitVector)
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
-          partitionInfo.update(aggBitVectorBc.value, nodeSplitBitVectorBc.value, numNodeOffsets)
+          partitionInfo.update(aggBitVector, nodeSplitBitVector, numNodeOffsets)
         }
         newPartitionInfos.cache().count() // TODO: remove.  For some reason, this is needed to make things work.  Probably messing up somewhere above...
         partitionInfos = newPartitionInfos
-
-        aggBitVectorBc.unpersist()
-        nodeSplitBitVectorBc.unpersist()
       }
 
       currentLevel += 1
@@ -672,8 +666,10 @@ private[ml] object AltDT extends Logging {
         featureIndex: Int,
         featureArity: Int,
         featureVector: Vector): FeatureVector = {
-      val (values, indices) = featureVector.toArray.zipWithIndex.sorted.unzip
-      new FeatureVector(featureIndex, featureArity, values.toArray, indices.toArray)
+      val values = featureVector.toArray
+      val indices = Range(0, values.length).toArray
+      DualPivotQuicksort.sort(values, indices)
+      new FeatureVector(featureIndex, featureArity, values, indices)
     }
   }
 
@@ -836,24 +832,16 @@ private[ml] object AltDT extends Logging {
               }
             }
             // Now, we sort the sub-arrays from [0, numBitsNotSet) and [numBitsNotSet, rangeValues.length)
-            // TODO: implement our own sorting, so that we don't have to unnecessarily construct
-            // intermediate objects to sort
-            val leftValsAndIndices = rangeValues.slice(0, numBitsNotSet).zip(rangeIndices.slice(0, numBitsNotSet)).sorted
-            val rightValsAndIndices = rangeValues.slice(numBitsNotSet, rangeValues.length).zip(rangeIndices.slice(numBitsNotSet, rangeValues.length)).sorted
-
-            val (sortedLeftRangeValues, sortedLeftRangeIndices) = leftValsAndIndices.unzip
-            val (sortedRightRangeValues, sortedRightRangeIndices) = rightValsAndIndices.unzip
-
-            val sortedRangeValues = sortedLeftRangeValues.iterator ++ sortedRightRangeValues.iterator
-            val sortedRangeIndices = sortedLeftRangeIndices.iterator ++ sortedRightRangeIndices.iterator
+            DualPivotQuicksort.sort(rangeValues, rangeIndices, 0, numBitsNotSet - 1)
+            DualPivotQuicksort.sort(rangeValues, rangeIndices, numBitsNotSet, rangeValues.length - 1)
             // END SORTING
 
             // update the column values and indices
             // with the corresponding indices
             var i = 0
             while (i < rangeValues.length) {
-              col.values(from + i) = sortedRangeValues.next()
-              col.indices(from + i) = sortedRangeIndices.next()
+              col.values(from + i) = rangeValues(i)
+              col.indices(from + i) = rangeIndices(i)
               i += 1
             }
           }
@@ -877,9 +865,7 @@ private[ml] object AltDT extends Logging {
           newNodeOffsetsIdx += 1
         }
       }
-
       PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
     }
   }
-
 }
