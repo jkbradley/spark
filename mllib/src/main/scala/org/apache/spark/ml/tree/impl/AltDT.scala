@@ -256,15 +256,21 @@ private[ml] object AltDT extends Logging {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int], activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
-        activeNodes.iterator.map { nodeIndexInLevel: Int =>
+        val toReturn = new Array[(Option[Split], ImpurityStats)](activeNodes.cardinality())
+        val iter: Iterator[Int] = activeNodes.iterator
+        var i = 0
+        while (iter.hasNext) {
+          val nodeIndexInLevel = iter.next
           val fromOffset = nodeOffsets(nodeIndexInLevel)
           val toOffset = nodeOffsets(nodeIndexInLevel + 1)
           val splitsAndStats =
             columns.map { col =>
               chooseSplit(col, localLabels, fromOffset, toOffset, metadata)
             }
-          splitsAndStats.maxBy(_._2.gain)
-        }.toArray
+          toReturn(i) = splitsAndStats.maxBy(_._2.gain)
+          i += 1
+        }
+        toReturn
     }
 
     // TODO: treeReduce
@@ -799,7 +805,10 @@ private[ml] object AltDT extends Logging {
             val oldOffset = newNodeOffsets(nodeIdx).head
             // numBitsNotSet == number of instances going to the left
             // which is how big the offset should be
-            newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numBitsNotSet)
+            if (numBitsNotSet == 0)
+              newNodeOffsets(nodeIdx) = Array(oldOffset)
+            else
+              newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numBitsNotSet)
 
             // first we move all of the values and indices that have
             // zero-bits to the front
@@ -848,10 +857,6 @@ private[ml] object AltDT extends Logging {
         }
         col
       }
-
-      assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
-        s"(W) newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
-          s" newNumNodeOffsets: $newNumNodeOffsets")
 
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
       val newActiveNodes = new BitSet(newNumNodeOffsets - 1)
