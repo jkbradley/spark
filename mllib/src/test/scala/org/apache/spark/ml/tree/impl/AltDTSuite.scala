@@ -231,7 +231,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(stats.valid)
   }
 
-  test("chooseUnorderedCategoricalSplit: basic case") { }
+  test("chooseUnorderedCategoricalSplit: basic case") {
     val featureIndex = 0
     val featureArity = 4
     val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
