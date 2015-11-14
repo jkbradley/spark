@@ -548,7 +548,6 @@ private[ml] object AltDT extends Logging {
       labels: Seq[Double],
       metadata: AltDTMetadata,
       featureArity: Int): (Option[Split], ImpurityStats) = {
-    // TODO: Consider more than one vs rest splits (e.g. subsets of the codomain values)
     val categories: List[Double] = values.toSet.toList
 
     // Label stats for each category
