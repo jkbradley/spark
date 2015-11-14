@@ -233,20 +233,23 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
   test("chooseUnorderedCategoricalSplit: basic case") { }
     val featureIndex = 0
+    val featureArity = 4
     val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
     val labels = Seq(0.0, 0.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
     val (split, stats) = AltDT.chooseUnorderedCategoricalSplit(
-      featureIndex, values, labels, metadata, 4)
+      featureIndex, values, labels, metadata, featureArity)
     split match {
       case Some(s: CategoricalSplit) =>
         assert(s.featureIndex === featureIndex)
+        assert(s.leftCategories.toSet === Set(0.0, 2.0))
+        assert(s.rightCategories.toSet === Set(1.0, 3.0))
+        // TODO: test correctness of stats
       case _ =>
         throw new AssertionError(
           s"Expected CategoricalSplit but got ${split.getClass.getSimpleName}")
     }
-    // TODO: this just exercises code path without checking anything, add correctness assertions
   }
 
   //  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") { }
