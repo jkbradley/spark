@@ -237,7 +237,8 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Seq(0.0, 0.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
-    val (split, stats) = AltDT.chooseUnorderedCategoricalSplit(featureIndex, values, labels, metadata)
+    val (split, stats) = AltDT.chooseUnorderedCategoricalSplit(
+      featureIndex, values, labels, metadata, values.toSet.size)
     split match {
       case Some(s: CategoricalSplit) =>
         assert(s.featureIndex === featureIndex)
