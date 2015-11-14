@@ -522,8 +522,7 @@ private[ml] object AltDT extends Logging {
    * Find the best split for an unordered categorical feature at a single node.
    *
    * Algorithm:
-   *  - Considers all one vs rest splits.
-   *    Thus, with a N-ary categorical feature, we consider N splits.
+   *  - Considers all possible subsets (possibly exponentially many)
    *
    * @param featureIndex  Index of feature being split.
    * @param values  Feature values at this node.  Sorted in increasing order.
@@ -538,46 +537,47 @@ private[ml] object AltDT extends Logging {
       labels: Seq[Double],
       metadata: AltDTMetadata,
       featureArity: Int): (Option[Split], ImpurityStats) = {
-    // TODO: consider more than one vs rest splits (e.g. subsets of the codomain values)
-
+    // TODO: Consider more than one vs rest splits (e.g. subsets of the codomain values)
     val categories: List[Double] = values.toSet.toList
-    assert(categories.size == featureArity, s"Expected featureArity=$featureArity but got ${categories.size}")
-    // NOTE: this assumes the values for categorical features are Ints in [0,featureArity), should use Map otherwise
+
+    // Label stats for each category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
+    require(categories.length <= featureArity, "Got more categories than featureArity")
     values.zip(labels).foreach { case (cat, label) =>
+      // NOTE: we assume the values for categorical features are Ints in [0,featureArity)
       aggStats(cat.toInt).update(label)
     }
 
-    // Cumulative sums of bin statistics for left, right parts of split.
+    // Aggregated statistics for left and right parts of split.
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
-    // Initialize with all stats going to the right
-    aggStats.foreach(rightImpurityAgg.add)
 
     require(featureArity > 0, "Feature arity cannot be negative")
     if (featureArity == 1) {
       val impurityStats = new ImpurityStats(0.0, rightImpurityAgg.getCalculator.calculate(),
-        rightImpurityAgg.getCalculator, leftImpurityAgg.getCalculator, rightImpurityAgg.getCalculator)
+        rightImpurityAgg.getCalculator, leftImpurityAgg.getCalculator,
+        rightImpurityAgg.getCalculator)
       (None, impurityStats)
     } else {
-      var bestSplitCat: Int = -1
+      //  TODO: We currently add and remove the stats for all categories for each split.
+      //  A better way to do it would be to consider splits in an order such that each iteration
+      //  only requires addition/removal of a single category and a single add/subtract to
+      //  leftCount and rightCount.
+      val splits: Array[CategoricalSplit] = findSplits(featureIndex, featureArity, metadata)
+      var bestSplit: Option[CategoricalSplit] = None
       val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
       var bestGain: Double = -1.0
+      aggStats.foreach(rightImpurityAgg.add)
       val fullImpurity = rightImpurityAgg.getCalculator.calculate()
-      var leftCount: Double = 0.0
-      var rightCount: Double = rightImpurityAgg.getCount
-      val fullCount: Double = rightCount
-
-      val numSplits = categories.size
-      var cat = 0
-      while (cat < numSplits) {
-        // Update left, right stats. Current category goes left, rest goes right.
-        val catStats = aggStats(cat)
-        leftImpurityAgg.add(catStats)
-        rightImpurityAgg.subtract(catStats)
-        leftCount += catStats.getCount
-        rightCount -= catStats.getCount
+      aggStats.foreach(rightImpurityAgg.subtract)
+      val fullCount: Double = values.size
+      for (split <- splits) {
+        // Update left, right impurity stats
+        split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
+        split.rightCategories.foreach(c => rightImpurityAgg.add(aggStats(c.toInt)))
+        val leftCount = leftImpurityAgg.getCount
+        val rightCount = rightImpurityAgg.getCount
         // Compute impurity
         val leftWeight = leftCount / fullCount
         val rightWeight = rightCount / fullCount
@@ -585,30 +585,76 @@ private[ml] object AltDT extends Logging {
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (gain > bestGain && gain > metadata.minInfoGain) {
-          bestSplitCat = cat
+          bestSplit = Some(split)
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
         }
-        // Reset impurity aggregators so all stats go right again.
-        leftImpurityAgg.subtract(catStats)
-        rightImpurityAgg.add(catStats)
-        leftCount -= catStats.getCount
-        rightCount += catStats.getCount
-        cat += 1
+        // Reset left, right impurity stats
+        split.leftCategories.foreach(c => leftImpurityAgg.subtract(aggStats(c.toInt)))
+        split.rightCategories.foreach(c => rightImpurityAgg.subtract(aggStats(c.toInt)))
       }
 
-      assert(bestSplitCat != -1, "Unknown error in AltDT split selection for unordered categorical" +
-        s" variable with numSplits = $numSplits.")
+      val bestFeatureSplit = bestSplit match {
+        case Some(split) =>
+          new CategoricalSplit(featureIndex, split.leftCategories, featureArity)
+        case None =>
+          throw new AssertionError("Unknown error in AltDT unordered categorical split selection")
 
-      val bestFeatureSplit =
-        new CategoricalSplit(featureIndex, Array(bestSplitCat), featureArity)
+      }
       val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
       val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
-      val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
-        bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
-
+      val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity,
+        fullImpurityAgg.getCalculator, bestLeftImpurityAgg.getCalculator,
+        bestRightImpurityAgg.getCalculator)
       (Some(bestFeatureSplit), bestImpurityStats)
     }
+  }
+
+  /**
+   * Returns all possible subsets of features for categorical splits.
+   */
+  private def findSplits(
+      featureIndex: Int,
+      featureArity: Int,
+      metadata: AltDTMetadata): Array[CategoricalSplit] = {
+    // Unordered features
+    // 2^(featureArity - 1) - 1 combinations
+    val numSplits = (1 << (featureArity - 1)) - 1
+    val splits = new Array[CategoricalSplit](numSplits)
+
+    var splitIndex = 0
+    while (splitIndex < numSplits) {
+      val categories: List[Double] =
+        extractMultiClassCategories(splitIndex + 1, featureArity)
+      splits(splitIndex) =
+        new CategoricalSplit(featureIndex, categories.toArray, featureArity)
+      splitIndex += 1
+    }
+    splits
+  }
+
+  /**
+   * Nested method to extract list of eligible categories given an index. It extracts the
+   * position of ones in a binary representation of the input. If binary
+   * representation of an number is 01101 (13), the output list should (3.0, 2.0,
+   * 0.0). The maxFeatureValue depict the number of rightmost digits that will be tested for ones.
+   */
+  private def extractMultiClassCategories(
+      input: Int,
+      maxFeatureValue: Int): List[Double] = {
+    var categories = List[Double]()
+    var j = 0
+    var bitShiftedInput = input
+    while (j < maxFeatureValue) {
+      if (bitShiftedInput % 2 != 0) {
+        // updating the list of categories.
+        categories = j.toDouble :: categories
+      }
+      // Right shift by one
+      bitShiftedInput = bitShiftedInput >> 1
+      j += 1
+    }
+    categories
   }
 
   /**
