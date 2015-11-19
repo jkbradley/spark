@@ -102,7 +102,7 @@ private[ml] object AltDT extends Logging {
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
     val rootNode = trainImpl(input, strategy)
-    RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
+    impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
@@ -533,7 +533,7 @@ private[ml] object AltDT extends Logging {
    * Find the best split for an unordered categorical feature at a single node.
    *
    * Algorithm:
-   *  - Considers all possible subsets (possibly exponentially many)
+   *  - Considers all possible subsets (exponentially many)
    *
    * @param featureIndex  Index of feature being split.
    * @param values  Feature values at this node.  Sorted in increasing order.
@@ -548,44 +548,42 @@ private[ml] object AltDT extends Logging {
       labels: Seq[Double],
       metadata: AltDTMetadata,
       featureArity: Int): (Option[Split], ImpurityStats) = {
-    val categories: List[Double] = values.toSet.toList
 
     // Label stats for each category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    require(categories.length <= featureArity, "Got more categories than featureArity")
     values.zip(labels).foreach { case (cat, label) =>
       // NOTE: we assume the values for categorical features are Ints in [0,featureArity)
       aggStats(cat.toInt).update(label)
     }
 
-    // Aggregated statistics for left and right parts of split.
+    // Aggregated statistics for left part of split and entire split.
     val leftImpurityAgg = metadata.createImpurityAggregator()
-    val rightImpurityAgg = metadata.createImpurityAggregator()
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    aggStats.foreach(fullImpurityAgg.add)
+    val fullImpurity = fullImpurityAgg.getCalculator.calculate()
 
-    require(featureArity > 0, "Feature arity cannot be negative")
     if (featureArity == 1) {
-      val impurityStats = new ImpurityStats(0.0, rightImpurityAgg.getCalculator.calculate(),
-        rightImpurityAgg.getCalculator, leftImpurityAgg.getCalculator,
-        rightImpurityAgg.getCalculator)
+      // All instances go right
+      val impurityStats = new ImpurityStats(0.0, fullImpurityAgg.getCalculator.calculate(),
+        fullImpurityAgg.getCalculator, leftImpurityAgg.getCalculator,
+        fullImpurityAgg.getCalculator)
       (None, impurityStats)
     } else {
       //  TODO: We currently add and remove the stats for all categories for each split.
       //  A better way to do it would be to consider splits in an order such that each iteration
       //  only requires addition/removal of a single category and a single add/subtract to
       //  leftCount and rightCount.
+      //  TODO: Use more efficient encoding such as gray codes
       val splits: Array[CategoricalSplit] = findSplits(featureIndex, featureArity, metadata)
       var bestSplit: Option[CategoricalSplit] = None
       val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
       var bestGain: Double = -1.0
-      aggStats.foreach(rightImpurityAgg.add)
-      val fullImpurity = rightImpurityAgg.getCalculator.calculate()
-      aggStats.foreach(rightImpurityAgg.subtract)
       val fullCount: Double = values.size
       for (split <- splits) {
         // Update left, right impurity stats
         split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
-        split.rightCategories.foreach(c => rightImpurityAgg.add(aggStats(c.toInt)))
+        val rightImpurityAgg = fullImpurityAgg.subtract(leftImpurityAgg)
         val leftCount = leftImpurityAgg.getCount
         val rightCount = rightImpurityAgg.getCount
         // Compute impurity
@@ -599,24 +597,22 @@ private[ml] object AltDT extends Logging {
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
         }
-        // Reset left, right impurity stats
-        split.leftCategories.foreach(c => leftImpurityAgg.subtract(aggStats(c.toInt)))
-        split.rightCategories.foreach(c => rightImpurityAgg.subtract(aggStats(c.toInt)))
+        // Reset left and full impurity stats
+        rightImpurityAgg.add(leftImpurityAgg)
+        leftImpurityAgg.clear()
       }
 
       val bestFeatureSplit = bestSplit match {
-        case Some(split) =>
-          new CategoricalSplit(featureIndex, split.leftCategories, featureArity)
-        case None =>
-          throw new AssertionError("Unknown error in AltDT unordered categorical split selection")
+        case Some(split) => Some(
+          new CategoricalSplit(featureIndex, split.leftCategories, featureArity))
+        case None => None
 
       }
-      val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
       val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
       val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity,
         fullImpurityAgg.getCalculator, bestLeftImpurityAgg.getCalculator,
         bestRightImpurityAgg.getCalculator)
-      (Some(bestFeatureSplit), bestImpurityStats)
+      (bestFeatureSplit, bestImpurityStats)
     }
   }
 
@@ -635,36 +631,12 @@ private[ml] object AltDT extends Logging {
     var splitIndex = 0
     while (splitIndex < numSplits) {
       val categories: List[Double] =
-        extractMultiClassCategories(splitIndex + 1, featureArity)
+        RandomForest.extractMultiClassCategories(splitIndex + 1, featureArity)
       splits(splitIndex) =
         new CategoricalSplit(featureIndex, categories.toArray, featureArity)
       splitIndex += 1
     }
     splits
-  }
-
-  /**
-   * Nested method to extract list of eligible categories given an index. It extracts the
-   * position of ones in a binary representation of the input. If binary
-   * representation of an number is 01101 (13), the output list should (3.0, 2.0,
-   * 0.0). The maxFeatureValue depict the number of rightmost digits that will be tested for ones.
-   */
-  private def extractMultiClassCategories(
-      input: Int,
-      maxFeatureValue: Int): List[Double] = {
-    var categories = List[Double]()
-    var j = 0
-    var bitShiftedInput = input
-    while (j < maxFeatureValue) {
-      if (bitShiftedInput % 2 != 0) {
-        // updating the list of categories.
-        categories = j.toDouble :: categories
-      }
-      // Right shift by one
-      bitShiftedInput = bitShiftedInput >> 1
-      j += 1
-    }
-    categories
   }
 
   /**
