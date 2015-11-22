@@ -160,7 +160,7 @@ private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) exten
   def prob(label: Double): Double = -1
 
   /** Get [[Predict]] struct. */
-  def getPredict = {
+  def getPredict: Predict = {
     val pred = this.predict
     new Predict(predict = pred, prob = this.prob(pred))
   }

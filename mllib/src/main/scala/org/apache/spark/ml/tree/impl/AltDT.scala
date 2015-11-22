@@ -87,7 +87,8 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] object AltDTMetadata {
-    def fromStrategy(strategy: Strategy) = new AltDTMetadata(strategy.numClasses, strategy.maxBins,
+    def fromStrategy(strategy: Strategy): AltDTMetadata =
+      new AltDTMetadata(strategy.numClasses, strategy.maxBins,
       strategy.minInfoGain, strategy.impurity)
   }
 
@@ -143,7 +144,8 @@ private[ml] object AltDT extends Logging {
     }
     // Group columns together into one array of columns per partition.
     // TODO: Test avoiding this grouping, and see if it matters.
-    val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions { iterator: Iterator[FeatureVector] =>
+    val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions {
+    iterator: Iterator[FeatureVector] =>
       if (iterator.nonEmpty) Iterator(iterator.toArray) else Iterator()
     }
     groupedColStore.persist(StorageLevel.MEMORY_AND_DISK)
@@ -197,8 +199,9 @@ private[ml] object AltDT extends Logging {
         // construct bit vector encoding which active nodes found a split
         val nodeSplitBitVector: BitSet = splits.zipWithIndex.foldLeft(new BitSet(splits.length))  {
           (acc: BitSet, splitAndIdx: (Option[Split], Int)) =>
-          if (splitAndIdx._1.isDefined)
+          if (splitAndIdx._1.isDefined) {
             acc.set(splitAndIdx._2)
+          }
           acc
         }
 
@@ -207,7 +210,9 @@ private[ml] object AltDT extends Logging {
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVector, nodeSplitBitVector, numNodeOffsets)
         }
-        newPartitionInfos.cache().count() // TODO: remove.  For some reason, this is needed to make things work.  Probably messing up somewhere above...
+        // TODO: remove.  For some reason, this is needed to make things work.
+        // Probably messing up somewhere above...
+        newPartitionInfos.cache().count()
         partitionInfos = newPartitionInfos
       }
 
@@ -253,7 +258,8 @@ private[ml] object AltDT extends Logging {
     //   for each active node, best split + info gain,
     //     where the best split is None if no useful split exists
     val partBestSplitsAndGains: RDD[Array[(Option[Split], ImpurityStats)]] = partitionInfos.map {
-      case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int], activeNodes: BitSet) =>
+      case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
+      activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
         val toReturn = new Array[(Option[Split], ImpurityStats)](activeNodes.cardinality())
@@ -344,7 +350,8 @@ private[ml] object AltDT extends Logging {
         val localBestSplits: Array[Option[Split]] = bestSplitsBc.value
         // localFeatureIndex[feature index] = index into PartitionInfo.columns
         val localFeatureIndex: Map[Int, Int] = columns.map(_.featureIndex).zipWithIndex.toMap
-        val bitSetForNodes: Iterator[BitSet] = activeNodes.iterator.zip(localBestSplits.iterator).flatMap {
+        val bitSetForNodes: Iterator[BitSet] = activeNodes.iterator.zip(localBestSplits.iterator).
+        flatMap {
           case (nodeIndexInLevel: Int, Some(split: Split)) =>
             if (localFeatureIndex.contains(split.featureIndex)) {
               // This partition has the column (feature) used for this split.
@@ -360,12 +367,11 @@ private[ml] object AltDT extends Logging {
             // This requires PartitionInfo.update to handle missing BitSubvectors.
             Iterator()
         }
-        if (bitSetForNodes.isEmpty)
-          new BitSet(0)
-        else
-          bitSetForNodes.reduce[BitSet] { (acc: BitSet, bitv: BitSet) =>
-           acc | bitv
-          }
+        if (bitSetForNodes.isEmpty) {
+            new BitSet(0)
+        } else {
+          bitSetForNodes.reduce[BitSet]((acc: BitSet, bitv: BitSet) => acc | bitv)
+        }
     }
     val aggBitVector: BitSet = workerBitSubvectors.reduce { (acc: BitSet, bitv: BitSet) =>
       acc | bitv
@@ -433,8 +439,8 @@ private[ml] object AltDT extends Logging {
     // TODO: Support high-arity features by using a single array to hold the stats.
 
     // aggStats(category) = label statistics for category
-    val aggStats: Array[ImpurityAggregatorSingle] = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
-      _ => metadata.createImpurityAggregator())
+    val aggStats: Array[ImpurityAggregatorSingle] = Array.tabulate[ImpurityAggregatorSingle](
+      featureArity)(_ => metadata.createImpurityAggregator())
     var i = 0
     val len = values.length
     while (i < len) {
@@ -770,7 +776,8 @@ private[ml] object AltDT extends Logging {
      * @param nodeSplitBitVector Bit vector encoding whether an active node was split or not
      * @return Updated partition info
      */
-    def update(instanceBitVector: BitSet, nodeSplitBitVector: BitSet, newNumNodeOffsets: Int): PartitionInfo = {
+    def update(instanceBitVector: BitSet, nodeSplitBitVector: BitSet, newNumNodeOffsets: Int):
+    PartitionInfo = {
       // Create a 2-level representation of the new nodeOffsets (to be flattened).
       // These 2 levels correspond to original nodes and their children (if split).
       val newNodeOffsets = nodeOffsets.map(Array(_))
@@ -805,10 +812,11 @@ private[ml] object AltDT extends Logging {
             val oldOffset = newNodeOffsets(nodeIdx).head
             // numBitsNotSet == number of instances going to the left
             // which is how big the offset should be
-            if (numBitsNotSet == 0)
+            if (numBitsNotSet == 0) {
               newNodeOffsets(nodeIdx) = Array(oldOffset)
-            else
+            } else {
               newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numBitsNotSet)
+            }
 
             // first we move all of the values and indices that have
             // zero-bits to the front
@@ -840,9 +848,11 @@ private[ml] object AltDT extends Logging {
                 end -= 1
               }
             }
-            // Now, we sort the sub-arrays from [0, numBitsNotSet) and [numBitsNotSet, rangeValues.length)
+            // Now, we sort the sub-arrays from [0, numBitsNotSet) and
+            // [numBitsNotSet, rangeValues.length)
             DualPivotQuicksort.sort(rangeValues, rangeIndices, 0, numBitsNotSet - 1)
-            DualPivotQuicksort.sort(rangeValues, rangeIndices, numBitsNotSet, rangeValues.length - 1)
+            DualPivotQuicksort.sort(rangeValues, rangeIndices, numBitsNotSet,
+              rangeValues.length - 1)
             // END SORTING
 
             // update the column values and indices
