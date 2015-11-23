@@ -48,14 +48,8 @@ private[tree] object TreeUtil {
    *       (First collect stats to decide how to partition.)
    * TODO: Move elsewhere in MLlib.
    */
-  def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Vector)] = {
+  def rowToColumnStoreDense(rowStore: RDD[Vector], numRows: Int): RDD[(Int, Vector)] = {
 
-    val numRows = {
-      val longNumRows: Long = rowStore.count()
-      require(longNumRows < Int.MaxValue, s"rowToColumnStore given RDD with $longNumRows rows," +
-        s" but can handle at most ${Int.MaxValue} rows")
-      longNumRows.toInt
-    }
     if (numRows == 0) {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
@@ -89,12 +83,16 @@ private[tree] object TreeUtil {
         //   = column values for each instance in sourcePartitionIndex,
         // where colIdx is a 0-based index for columns for groupIndex
         val columnSets = new Array[Array[ArrayBuffer[Double]]](numTargetPartitions)
-        Range(0, numTargetPartitions).foreach { groupIndex =>
+        var groupIndex = 0
+        while(groupIndex < numTargetPartitions) {
           columnSets(groupIndex) =
             Array.fill[ArrayBuffer[Double]](getNumColsInGroup(groupIndex))(ArrayBuffer[Double]())
+          groupIndex += 1
         }
-        iterator.foreach { row =>
-          Range(0, numTargetPartitions).foreach { groupIndex =>
+        while (iterator.hasNext) {
+          val row: Vector = iterator.next()
+          var groupIndex = 0
+          while (groupIndex < numTargetPartitions) {
             val fromCol = groupIndex * maxColumnsPerPartition
             val numColsInTargetPartition = getNumColsInGroup(groupIndex)
             // TODO: match-case here on row as Dense or Sparse Vector (for speed)
@@ -103,6 +101,7 @@ private[tree] object TreeUtil {
               columnSets(groupIndex)(colIdx) += row(fromCol + colIdx)
               colIdx += 1
             }
+            groupIndex += 1
           }
         }
         Range(0, numTargetPartitions).map { groupIndex =>
