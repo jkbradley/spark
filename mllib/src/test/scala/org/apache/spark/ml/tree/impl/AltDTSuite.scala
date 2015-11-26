@@ -252,7 +252,24 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     }
   }
 
-  //  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") { }
+  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") {
+    val featureIndex = 0
+    val featureArity = 4
+    val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
+    val labels = Seq(1, 1, 1, 1, 1, 1, 1).map(_.toDouble)
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+    val (split, stats) =
+      AltDT.chooseOrderedCategoricalSplit(featureIndex, values, labels, metadata, featureArity)
+    assert(split.isEmpty)
+    val fullImpurityStatsArray =
+      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+    assert(stats.gain === 0.0)
+    assert(stats.impurity === fullImpurity)
+    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+    assert(stats.valid)
+  }
 
   test("chooseContinuousSplit: basic case") {
     val featureIndex = 0
