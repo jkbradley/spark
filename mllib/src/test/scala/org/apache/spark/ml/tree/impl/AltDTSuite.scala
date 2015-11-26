@@ -256,7 +256,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val featureIndex = 0
     val featureArity = 4
     val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
-    val labels = Seq(1, 1, 1, 1, 1, 1, 1).map(_.toDouble)
+    val labels = Seq(1.0, 1.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
     val (split, stats) =
