@@ -583,7 +583,7 @@ private[ml] object AltDT extends Logging {
       for (split <- splits) {
         // Update left, right impurity stats
         split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
-        val rightImpurityAgg = fullImpurityAgg.subtract(leftImpurityAgg)
+        val rightImpurityAgg = fullImpurityAgg.deepCopy().subtract(leftImpurityAgg)
         val leftCount = leftImpurityAgg.getCount
         val rightCount = rightImpurityAgg.getCount
         // Compute impurity
@@ -597,8 +597,7 @@ private[ml] object AltDT extends Logging {
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
         }
-        // Reset left and full impurity stats
-        rightImpurityAgg.add(leftImpurityAgg)
+        // Reset left impurity stats
         leftImpurityAgg.clear()
       }
 
