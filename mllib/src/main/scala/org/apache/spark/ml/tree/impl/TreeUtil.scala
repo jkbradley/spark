@@ -121,11 +121,13 @@ private[tree] object TreeUtil {
 
     // Each target partition now holds its set of columns.
     // Group the partial columns into full columns.
-    val fullColumns = groupedPartialColumns.flatMap { case (groupIndex, iterator) =>
+    val fullColumns = groupedPartialColumns.flatMap { case (groupIndex, iterable) =>
       // We do not know the number of rows per group, so we need to collect the groups
       // before filling the full columns.
       val collectedPartCols = new Array[Array[Array[Double]]](numSourcePartitions)
-      iterator.foreach { case (sourcePartitionIndex, partCols) =>
+      val iter = iterable.iterator
+      while (iter.hasNext) {
+        val (sourcePartitionIndex, partCols) = iter.next()
         collectedPartCols(sourcePartitionIndex) = partCols
       }
       val rowOffsets: Array[Int] = collectedPartCols.map(_(0).length).scanLeft(0)(_ + _)
@@ -342,7 +344,7 @@ private[tree] object TreeUtil {
 
     // Each target partition now holds its set of columns.
     // Group the partial columns into full columns.
-    val fullColumns = groupedPartialColumns.flatMap { case (groupIndex, iterator) =>
+    val fullColumns = groupedPartialColumns.flatMap { case (groupIndex, iterable) =>
       val numColsInGroup = groupStartColumns(groupIndex + 1) - groupStartColumns(groupIndex)
 
       // We do not know the number of rows or non-zeros per group, so we need to collect the groups
@@ -351,10 +353,15 @@ private[tree] object TreeUtil {
       val collectedPartCols = new Array[Array[SparseVector]](numSourcePartitions)
       // nzCounts(colIdx)(sourcePartitionIndex) = number of non-zeros
       val nzCounts = Array.fill[Array[Int]](numColsInGroup)(Array.fill[Int](numSourcePartitions)(0))
-      iterator.foreach { case (sourcePartitionIndex, partCols) =>
+      val iter = iterable.iterator
+      while (iter.hasNext) {
+        val (sourcePartitionIndex, partCols) = iter.next()
         collectedPartCols(sourcePartitionIndex) = partCols
-        partCols.zipWithIndex.foreach { case (partCol, colIdx) =>
+        var colIdx = 0
+        while (colIdx < partCols.length) {
+          val partCol = partCols(colIdx)
           nzCounts(colIdx)(sourcePartitionIndex) += partCol.indices.length
+          colIdx += 1
         }
       }
       // nzOffsets(colIdx)(sourcePartitionIndex) = cumulative number of non-zeros
