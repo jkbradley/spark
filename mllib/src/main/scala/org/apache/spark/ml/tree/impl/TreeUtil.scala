@@ -89,12 +89,16 @@ private[tree] object TreeUtil {
         //   = column values for each instance in sourcePartitionIndex,
         // where colIdx is a 0-based index for columns for groupIndex
         val columnSets = new Array[Array[ArrayBuffer[Double]]](numTargetPartitions)
-        Range(0, numTargetPartitions).foreach { groupIndex =>
+        var groupIndex = 0
+        while(groupIndex < numTargetPartitions) {
           columnSets(groupIndex) =
             Array.fill[ArrayBuffer[Double]](getNumColsInGroup(groupIndex))(ArrayBuffer[Double]())
+          groupIndex += 1
         }
-        iterator.foreach { row =>
-          Range(0, numTargetPartitions).foreach { groupIndex =>
+        while (iterator.hasNext) {
+          val row: Vector = iterator.next()
+          var groupIndex = 0
+          while (groupIndex < numTargetPartitions) {
             val fromCol = groupIndex * maxColumnsPerPartition
             val numColsInTargetPartition = getNumColsInGroup(groupIndex)
             // TODO: match-case here on row as Dense or Sparse Vector (for speed)
@@ -103,11 +107,11 @@ private[tree] object TreeUtil {
               columnSets(groupIndex)(colIdx) += row(fromCol + colIdx)
               colIdx += 1
             }
+            groupIndex += 1
           }
         }
         Range(0, numTargetPartitions).map { groupIndex =>
-          (groupIndex,
-            (sourcePartitionIndex, columnSets(groupIndex).map(_.toArray)))
+          (groupIndex, (sourcePartitionIndex, columnSets(groupIndex).map(_.toArray)))
         }.toIterator
       }
 
@@ -273,17 +277,20 @@ private[tree] object TreeUtil {
         val columnSetSizes = new Array[Array[Int]](numGroups)
         val columnSetIndices = new Array[Array[ArrayBuffer[Int]]](numGroups)
         val columnSetValues = new Array[Array[ArrayBuffer[Double]]](numGroups)
-        Range(0, numGroups).foreach { groupIndex =>
+        var groupIndex = 0
+        while (groupIndex < numGroups) {
           val numColsInGroup = groupStartColumns(groupIndex + 1) - groupStartColumns(groupIndex)
           columnSetSizes(groupIndex) = Array.fill[Int](numColsInGroup)(0)
           columnSetIndices(groupIndex) =
             Array.fill[ArrayBuffer[Int]](numColsInGroup)(new ArrayBuffer[Int])
           columnSetValues(groupIndex) =
             Array.fill[ArrayBuffer[Double]](numColsInGroup)(new ArrayBuffer[Double])
+          groupIndex += 1
         }
         iterator.foreach {
           case (dv: DenseVector, rowIndex: Long) =>
-            Range(0, numGroups).foreach { groupIndex =>
+            var groupIndex = 0
+            while (groupIndex < numGroups) {
               val fromCol = groupStartColumns(groupIndex)
               val numColsInGroup = groupStartColumns(groupIndex + 1) - groupStartColumns(groupIndex)
               var colIdx = 0
@@ -293,6 +300,7 @@ private[tree] object TreeUtil {
                 columnSetValues(groupIndex)(colIdx) += dv(fromCol + colIdx)
                 colIdx += 1
               }
+              groupIndex += 1
             }
           case (sv: SparseVector, rowIndex: Long) =>
             /*
