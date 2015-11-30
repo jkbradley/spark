@@ -135,7 +135,7 @@ private[ml] object AltDT extends Logging {
     }
     val labelsBc = input.sparkContext.broadcast(labels)
     // NOTE: Labels are not sorted with features since that would require 1 copy per feature,
-    //       rather than 1 copy per worker.  This means a lot of random accesses.
+    //       rather than 1 copy per worker. This means a lot of random accesses.
     //       We could improve this by applying first-level sorting (by node) to labels.
 
     // Sort each column by feature values.
@@ -196,23 +196,19 @@ private[ml] object AltDT extends Logging {
       doneLearning = currentLevel + 1 >= strategy.maxDepth || estimatedRemainingActive == 0
 
       if (!doneLearning) {
-        // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right.
-        val aggBitVectors: Array[BitSubvector] =
-          collectBitVectors(partitionInfos, bestSplitsAndGains.map(_._1))
+        val splits: Array[Option[Split]] = bestSplitsAndGains.map(_._1)
 
-        // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
-        val aggBitVectorsBc = input.sparkContext.broadcast(aggBitVectors)
+        // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right
+        val aggBitVector: BitSet = aggregateBitVector(partitionInfos, splits, numRows)
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
-          partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
+          partitionInfo.update(aggBitVector, numNodeOffsets)
         }
         // TODO: remove.  For some reason, this is needed to make things work.
         // Probably messing up somewhere above...
         newPartitionInfos.cache().count()
         partitionInfos = newPartitionInfos
 
-        // TODO: unpersist aggBitVectorsBc after action.
       }
-
       currentLevel += 1
     }
 
@@ -333,42 +329,51 @@ private[ml] object AltDT extends Logging {
    * @param bestSplits  Split for each active node, or None if that node will not be split
    * @return Array of bit vectors, ordered by offset ranges
    */
-  private[impl] def collectBitVectors(
+  private[impl] def aggregateBitVector(
       partitionInfos: RDD[PartitionInfo],
-      bestSplits: Array[Option[Split]]): Array[BitSubvector] = {
+      bestSplits: Array[Option[Split]],
+      numRows: Int): BitSet = {
     val bestSplitsBc: Broadcast[Array[Option[Split]]] =
       partitionInfos.sparkContext.broadcast(bestSplits)
-    val workerBitSubvectors: RDD[Array[BitSubvector]] = partitionInfos.map {
+    val workerBitSubvectors: RDD[BitSet] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
                          activeNodes: BitSet) =>
         val localBestSplits: Array[Option[Split]] = bestSplitsBc.value
         // localFeatureIndex[feature index] = index into PartitionInfo.columns
         val localFeatureIndex: Map[Int, Int] = columns.map(_.featureIndex).zipWithIndex.toMap
-        activeNodes.iterator.zip(localBestSplits.iterator).flatMap {
+        val bitSetForNodes: Iterator[BitSet] = activeNodes.iterator.zip(localBestSplits.iterator).
+        flatMap {
           case (nodeIndexInLevel: Int, Some(split: Split)) =>
             if (localFeatureIndex.contains(split.featureIndex)) {
               // This partition has the column (feature) used for this split.
               val fromOffset = nodeOffsets(nodeIndexInLevel)
               val toOffset = nodeOffsets(nodeIndexInLevel + 1)
               val colIndex: Int = localFeatureIndex(split.featureIndex)
-              Iterator(bitSubvectorFromSplit(columns(colIndex), fromOffset, toOffset, split))
+              Iterator(bitVectorFromSplit(columns(colIndex), fromOffset, toOffset, split, numRows))
             } else {
               Iterator()
             }
           case (nodeIndexInLevel: Int, None) =>
-            // Do not create a BitSubvector when there is no split.
-            // This requires PartitionInfo.update to handle missing BitSubvectors.
+            // Do not create a bitVector when there is no split.
+            // PartitionInfo.update will detect that there is no
+            // split, by how many instances go left/right.
             Iterator()
-        }.toArray
+        }
+        if (bitSetForNodes.isEmpty) {
+          new BitSet(0)
+        } else {
+          bitSetForNodes.reduce[BitSet]((acc: BitSet, bitv: BitSet) => acc | bitv)
+        }
     }
-    val aggBitVectors: Array[BitSubvector] = workerBitSubvectors.reduce(BitSubvector.merge)
+    val aggBitVector: BitSet = workerBitSubvectors.reduce { (acc: BitSet, bitv: BitSet) =>
+      acc | bitv
+    }
     bestSplitsBc.unpersist()
-    aggBitVectors
+    aggBitVector
   }
 
   /**
    * Choose the best split for a feature at a node.
-   *
    * TODO: Return null or None when the split is invalid, such as putting all instances on one
    *       child node.
    *
@@ -787,20 +792,21 @@ private[ml] object AltDT extends Logging {
    *          second by sorted row indices within the node's rows.
    *          bit[index in sorted array of row indices] = false for left, true for right
    */
-  private[impl] def bitSubvectorFromSplit(
+  private[impl] def bitVectorFromSplit(
       col: FeatureVector,
       fromOffset: Int,
       toOffset: Int,
-      split: Split): BitSubvector = {
+      split: Split,
+      numRows: Int): BitSet = {
     val nodeRowIndices = col.indices.slice(fromOffset, toOffset)
     val nodeRowValues = col.values.slice(fromOffset, toOffset)
-    val nodeRowValuesSortedByIndices = nodeRowIndices.zip(nodeRowValues).sortBy(_._1).map(_._2)
-    val bitv = new BitSubvector(fromOffset, toOffset)
+    val bitv = new BitSet(numRows)
     var i = 0
-    while (i < nodeRowValuesSortedByIndices.length) {
-      val value = nodeRowValuesSortedByIndices(i)
+    while (i < nodeRowValues.length) {
+      val value = nodeRowValues(i)
+      val idx = nodeRowIndices(i)
       if (!split.shouldGoLeft(value)) {
-        bitv.set(fromOffset + i)
+        bitv.set(idx)
       }
       i += 1
     }
@@ -854,81 +860,113 @@ private[ml] object AltDT extends Logging {
      * Update nodeOffsets, activeNodes:
      *   Split offsets for nodes which split (which can be identified using the bit vector).
      *
-     * @param bitVectors  Bit vectors encoding splits for the next level of the tree.
+     * @param instanceBitVector  Bit vector encoding splits for the next level of the tree.
      *                    These must follow a 2-level ordering, where the first level is by node
      *                    and the second level is by row index.
      *                    bitVector(i) = false iff instance i goes to the left child.
      *                    For instances at inactive (leaf) nodes, the value can be arbitrary.
-     *                    When an active node is not split (e.g., because no good split was found),
-     *                    then the corresponding BitSubvector can be missing.
      * @return Updated partition info
      */
-    def update(bitVectors: Array[BitSubvector], newNumNodeOffsets: Int): PartitionInfo = {
-      val newColumns = columns.map { oldCol =>
-        val col = oldCol.deepCopy()
-        var curBitVecIdx = 0
-        activeNodes.iterator.foreach { nodeIdx =>
+    def update(instanceBitVector: BitSet, newNumNodeOffsets: Int):
+    PartitionInfo = {
+      // Create a 2-level representation of the new nodeOffsets (to be flattened).
+      // These 2 levels correspond to original nodes and their children (if split).
+      val newNodeOffsets = nodeOffsets.map(Array(_))
+
+      val newColumns = columns.map { col =>
+        val iter = activeNodes.iterator
+        while (iter.hasNext) {
+          val nodeIdx = iter.next()
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
-          if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
-            // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
-            // which is acceptable (since it will not cover further nodes which were not split).
-            curBitVecIdx += 1
-          }
-          val curBitVector = bitVectors(curBitVecIdx)
-          // If the current BitVector does not cover this node, then this node was not split,
-          // so we do not need to update its part of the column.  Otherwise, we update it.
-          if (curBitVector.from <= from && to <= curBitVector.to) {
-            // Sort range [from, to) based on indices.  This is required to match the bit vector
-            // across all workers.  See [[bitSubvectorFromSplit]] for details.
-            val rangeIndices = col.indices.view.slice(from, to).toArray
-            val rangeValues = col.values.view.slice(from, to).toArray
-            val sortedRange = rangeIndices.zip(rangeValues).sortBy(_._1)
-            // Sort range [from, to) based on bit vector.
-            sortedRange.zipWithIndex.map { case ((idx, value), i) =>
-              val bit = curBitVector.get(from + i)
-              // TODO: In-place merge, rather than general sort.
-              // TODO: We don't actually need to sort the categorical features using our approach.
-              (bit, value, idx)
-            }.sorted.zipWithIndex.foreach { case ((bit, value, idx), i) =>
-              col.values(from + i) = value
-              col.indices(from + i) = idx
+          val rangeIndices = col.indices.slice(from, to)
+          val rangeValues = col.values.slice(from, to)
+
+          // if this is the very first time we split
+          // we don't have to use the indices to figure
+          // out which bits are turned on
+          val numBitsSet = if (nodeOffsets.length == 2) instanceBitVector.cardinality
+                           else rangeIndices.count(instanceBitVector.get)
+          val numBitsNotSet = to - from - numBitsSet
+          val oldOffset = newNodeOffsets(nodeIdx).head
+          // numBitsNotSet == number of instances going to the left
+          // which is how big the offset should be
+          // if numBitsNotSet == 0, then this node was not split,
+          // so we do not need to update its part of the column. Otherwise, we update it.
+          if (numBitsNotSet == 0 || numBitsSet == 0) {
+            newNodeOffsets(nodeIdx) = Array(oldOffset)
+          } else {
+            newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numBitsNotSet)
+            // Sort range [from, to) based on split, then value. This is required to match
+            // the bit vector across all workers. See [[bitVectorFromSplit]] for details.
+            // Within [from, to), we will have all "left child" instances (those that are false),
+            // then all "right child" instances. Then, within each child, we sort by value, so
+            // we can compute the best split for the next iteration. The corresponding index for
+            // an instance is used to look up the split value ("left" or "right") in the
+            // instanceBitVector, which is ordered by index.
+
+            // BEGIN SORTING
+            var start = 0
+            var end = rangeValues.length - 1
+
+            // first we move all of the values and indices that have
+            // zero-bits to the front
+            while (start < numBitsNotSet && start <= end) {
+              // "start <= end" isn't really necessary, but we
+              // include it anyways
+              val startBit = instanceBitVector.get(rangeIndices(start))
+              val endBit = instanceBitVector.get(rangeIndices(end))
+              // if the startBit is false, we increment and move on
+              if (!startBit) {
+                start += 1
+              }
+              // if endBit is true, we decrement and move on
+              if (endBit) {
+                end -= 1
+                // if startBit is true and endBit is false, we swap
+              } else if (startBit && !endBit) {
+                // swap both in rangeValues and in rangeIndices
+                // (this should be a separate helper function,
+                // but we want to avoid function calls)
+                val tempVal = rangeValues(start)
+                rangeValues(start) = rangeValues(end)
+                rangeValues(end) = tempVal
+                val tempIdx = rangeIndices(start)
+                rangeIndices(start) = rangeIndices(end)
+                rangeIndices(end) = tempIdx
+                // update both start and end
+                start += 1
+                end -= 1
+              }
+            }
+            // Now, we sort the sub-arrays from [0, numBitsNotSet) and
+            // [numBitsNotSet, rangeValues.length)
+            val leftValsAndIndices = rangeValues.slice(0, numBitsNotSet).zip(rangeIndices.slice(0,
+              numBitsNotSet)).sorted
+            val rightValsAndIndices = rangeValues.slice(numBitsNotSet,
+              rangeValues.length).zip(rangeIndices.slice(numBitsNotSet, rangeValues.length)).sorted
+
+            val (sortedLeftRangeValues, sortedLeftRangeIndices) = leftValsAndIndices.unzip
+            val (sortedRightRangeValues, sortedRightRangeIndices) = rightValsAndIndices.unzip
+
+            val sortedRangeValues = sortedLeftRangeValues.iterator ++
+              sortedRightRangeValues.iterator
+            val sortedRangeIndices = sortedLeftRangeIndices.iterator ++
+              sortedRightRangeIndices.iterator
+            // END SORTING
+
+            // update the column values and indices
+            // with the corresponding indices
+            var i = 0
+            while (i < rangeValues.length) {
+              col.values(from + i) = sortedRangeValues.next()
+              col.indices(from + i) = sortedRangeIndices.next()
+              i += 1
             }
           }
         }
         col
       }
-
-      // Create a 2-level representation of the new nodeOffsets (to be flattened).
-      // These 2 levels correspond to original nodes and their children (if split).
-      val newNodeOffsets = nodeOffsets.map(Array(_))
-      var curBitVecIdx = 0
-      activeNodes.iterator.foreach { nodeIdx =>
-        val from = nodeOffsets(nodeIdx)
-        val to = nodeOffsets(nodeIdx + 1)
-        if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
-          // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
-          // which is acceptable (since it will not cover further nodes which were not split).
-          curBitVecIdx += 1
-        }
-        val curBitVector = bitVectors(curBitVecIdx)
-        // If the current BitVector does not cover this node, then this node was not split,
-        // so we do not need to create a new node offset.  Otherwise, we create an offset.
-        if (curBitVector.from <= from && to <= curBitVector.to) {
-          // Count number of values splitting to left vs. right
-          val numRight = Range(from, to).count(curBitVector.get)
-          val numLeft = to - from - numRight
-          if (numLeft != 0 && numRight != 0) {
-            // node is split
-            val oldOffset = newNodeOffsets(nodeIdx).head
-            newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
-          }
-        }
-      }
-
-      assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
-        s"(W) newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
-          s" newNumNodeOffsets: $newNumNodeOffsets")
 
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
       val newActiveNodes = new BitSet(newNumNodeOffsets - 1)

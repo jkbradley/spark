@@ -21,8 +21,7 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.regression.DecisionTreeRegressor
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.AltDT.{AltDTMetadata, FeatureVector, PartitionInfo}
-import org.apache.spark.ml.tree.impl.TreeUtil._
-import org.apache.spark.mllib.linalg.{SparseVector, Vector, Vectors}
+import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.impurity._
 import org.apache.spark.mllib.tree.model.ImpurityStats
@@ -34,7 +33,7 @@ import org.apache.spark.util.collection.BitSet
  */
 class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
-  //////////////////////////////// Integration tests //////////////////////////////////
+  /* * * * * * * * * * * Integration tests * * * * * * * * * * */
 
   test("run deep example") {
     val data = Range(0, 3).map(x => LabeledPoint(math.pow(x, 3), Vectors.dense(x)))
@@ -70,6 +69,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(grandkids.forall(_.isInstanceOf[InternalNode]))
   }
 
+<<<<<<< 49991b86876c8befec6f240ba6161e9aa54fdc92
   test("example with imbalanced tree") {
     val data = Seq(
       (0.0, Vectors.dense(0.0, 0.0)),
@@ -92,7 +92,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(model.numNodes === 5)
   }
 
-  //////////////////////////////// Helper classes //////////////////////////////////
+  /* * * * * * * * * * * Helper classes * * * * * * * * * * */
 
   test("FeatureVector") {
     val v = new FeatureVector(1, 0, Array(0.1, 0.3, 0.7), Array(1, 2, 0))
@@ -122,11 +122,12 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
     // Create bitVector for splitting the 4 rows: L, R, L, R
     // New groups are {0, 2}, {1, 3}
-    val bitVector = new BitSubvector(0, numRows)
+    val bitVector = new BitSet(numRows)
     bitVector.set(1)
     bitVector.set(3)
 
-    val newInfo = info.update(Array(bitVector), newNumNodeOffsets = 3)
+    // for these tests, use the activeNodes for nodeSplitBitVector
+    val newInfo = info.update(bitVector, newNumNodeOffsets = 3)
 
     assert(newInfo.columns.length === 2)
     val expectedCol1a =
@@ -139,12 +140,11 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(newInfo.activeNodes.iterator.toSet === Set(0, 1))
 
     // Create 2 bitVectors for splitting into: 0, 2, 1, 3
-    val bv2a = new BitSubvector(0, 2)
-    bv2a.set(1)
-    val bv2b = new BitSubvector(2, 4)
-    bv2b.set(3)
+    val bitVector2 = new BitSet(numRows)
+    bitVector2.set(2) // 2 goes to the right
+    bitVector2.set(3) // 3 goes to the right
 
-    val newInfo2 = newInfo.update(Array(bv2a, bv2b), newNumNodeOffsets = 5)
+    val newInfo2 = newInfo.update(bitVector2, newNumNodeOffsets = 5)
 
     assert(newInfo2.columns.length === 2)
     val expectedCol2a =
@@ -157,7 +157,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(newInfo2.activeNodes.iterator.toSet === Set(0, 1, 2, 3))
   }
 
-  //////////////////////////////// Misc //////////////////////////////////
+  /* * * * * * * * * * * Misc  * * * * * * * * * * */
 
   test("numUnorderedBins") {
     // Note: We have duplicate bins (the inverse) for unordered features.  This should be fixed!
@@ -165,7 +165,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(AltDT.numUnorderedBins(3) === 6)  // 3 categories => 6 bins
   }
 
-  //////////////////////////////// Choosing splits //////////////////////////////////
+  /* * * * * * * * * * * Choosing Splits  * * * * * * * * * * */
 
   test("computeBestSplits") {
     // TODO
@@ -337,17 +337,16 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
   }
 
-  //////////////////////////////// Bit subvectors //////////////////////////////////
+  /* * * * * * * * * * * Bit subvectors * * * * * * * * * * */
 
   test("bitSubvectorFromSplit: 1 node") {
     val col =
       FeatureVector.fromOriginal(0, 0, Vectors.dense(0.1, 0.2, 0.4, 0.6, 0.7))
     val fromOffset = 0
     val toOffset = col.values.length
+    val numRows = toOffset
     val split = new ContinuousSplit(0, threshold = 0.5)
-    val bitv = AltDT.bitSubvectorFromSplit(col, fromOffset, toOffset, split)
-    assert(bitv.from === fromOffset)
-    assert(bitv.to === toOffset)
+    val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
     assert(bitv.iterator.toSet === Set(3, 4))
   }
 
@@ -355,20 +354,21 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     // Initially, 1 split: (0, 2, 4) | (1, 3)
     val col = new FeatureVector(0, 0, Array(0.1, 0.2, 0.4, 0.6, 0.7),
       Array(4, 2, 0, 1, 3))
-    def checkSplit(fromOffset: Int, toOffset: Int, threshold: Double, expectedRight: Set[Int]): Unit = {
+    def checkSplit(fromOffset: Int, toOffset: Int, threshold: Double,
+    expectedRight: Set[Int]): Unit = {
       val split = new ContinuousSplit(0, threshold)
-      val bitv = AltDT.bitSubvectorFromSplit(col, fromOffset, toOffset, split)
-      assert(bitv.from === fromOffset)
-      assert(bitv.to === toOffset)
+      val numRows = col.values.length
+      val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
       assert(bitv.iterator.toSet === expectedRight)
     }
     // Left child node
-    checkSplit(0, 3, 0.15, Set(0, 1))
+    checkSplit(0, 3, 0.05, Set(0, 2, 4))
+    checkSplit(0, 3, 0.15, Set(0, 2))
     checkSplit(0, 3, 0.2, Set(0))
     checkSplit(0, 3, 0.5, Set())
     // Right child node
-    checkSplit(3, 5, 0.1, Set(3, 4))
-    checkSplit(3, 5, 0.65, Set(4))
+    checkSplit(3, 5, 0.1, Set(1, 3))
+    checkSplit(3, 5, 0.65, Set(3))
     checkSplit(3, 5, 0.8, Set())
   }
 
@@ -381,30 +381,25 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = 0.5)
-    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(Some(bestSplit)))
-    assert(bitVectors.length === 1)
-    val bitv = bitVectors.head
-    assert(bitv.numBits === numRows)
-    assert(bitv.iterator.toArray === Array(3, 4))
+    val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
+    assert(bitVector.iterator.toSet === Set(3, 4))
   }
 
   test("collectBitVectors with 1 vector, with tied threshold") {
     val col = new FeatureVector(0, 0,
-      Array(-4.0,-4.0,-2.0,-2.0,-1.0,-1.0,1.0,1.0), Array(3,7,2,6,1,5,0,4))
+      Array(-4.0, -4.0, -2.0, -2.0, -1.0, -1.0, 1.0, 1.0),
+      Array(3, 7, 2, 6, 1, 5, 0, 4))
     val numRows = col.values.length
     val activeNodes = new BitSet(1)
     activeNodes.set(0)
     val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = -2.0)
-    val bitVectors = AltDT.collectBitVectors(partitionInfos, Array(Some(bestSplit)))
-    assert(bitVectors.length === 1)
-    val bitv = bitVectors.head
-    assert(bitv.numBits === numRows)
-    assert(bitv.iterator.toArray === Array(0, 1, 4, 5))
+    val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
+    assert(bitVector.iterator.toSet === Set(0, 1, 4, 5))
   }
 
-  //////////////////////////////// Active nodes //////////////////////////////////
+  /* * * * * * * * * * * Active nodes * * * * * * * * * * */
 
   test("computeActiveNodePeriphery") {
     // old periphery: 2 nodes
