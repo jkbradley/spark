@@ -256,15 +256,21 @@ private[ml] object AltDT extends Logging {
           activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
-        activeNodes.iterator.map { nodeIndexInLevel: Int =>
+        val toReturn = new Array[(Option[Split], ImpurityStats)](activeNodes.cardinality())
+        val iter: Iterator[Int] = activeNodes.iterator
+        var i = 0
+        while (iter.hasNext) {
+          val nodeIndexInLevel = iter.next
           val fromOffset = nodeOffsets(nodeIndexInLevel)
           val toOffset = nodeOffsets(nodeIndexInLevel + 1)
           val splitsAndStats =
             columns.map { col =>
               chooseSplit(col, localLabels, fromOffset, toOffset, metadata)
             }
-          splitsAndStats.maxBy(_._2.gain)
-        }.toArray
+          toReturn(i) = splitsAndStats.maxBy(_._2.gain)
+          i += 1
+        }
+        toReturn
     }
 
     // TODO: treeReduce
@@ -420,8 +426,13 @@ private[ml] object AltDT extends Logging {
     // aggStats(category) = label statistics for category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    values.zip(labels).foreach { case (cat, label) =>
+    var i = 0
+    val len = values.length
+    while (i < len) {
+      val cat = values(i)
+      val label = labels(i)
       aggStats(cat.toInt).update(label)
+      i += 1
     }
 
     // Compute centroids.  centroidsForCategories is a list: (category, centroid)
@@ -471,7 +482,12 @@ private[ml] object AltDT extends Logging {
     // Cumulative sums of bin statistics for left, right parts of split.
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
-    aggStats.foreach(rightImpurityAgg.add)
+    var j = 0
+    val length = aggStats.length
+    while (j < length) {
+      rightImpurityAgg.add(aggStats(j))
+      j += 1
+    }
 
     var bestSplitIndex: Int = -1  // index into categoriesSortedByCentroid
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
@@ -645,7 +661,12 @@ private[ml] object AltDT extends Logging {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
-    labels.foreach(rightImpurityAgg.update(_, 1.0))
+    var i = 0
+    val len = labels.length
+    while (i < len) {
+      rightImpurityAgg.update(labels(i), 1.0)
+      i += 1
+    }
 
     var bestThreshold: Double = Double.NegativeInfinity
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
@@ -655,7 +676,11 @@ private[ml] object AltDT extends Logging {
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
-    values.zip(labels).foreach { case (value, label) =>
+    var j = 0
+    val length = values.length
+    while (j < length) {
+      val value = values(j)
+      val label = labels(j)
       if (value != currentThreshold) {
         // Check gain
         val leftWeight = leftCount / fullCount
@@ -675,6 +700,7 @@ private[ml] object AltDT extends Logging {
       rightImpurityAgg.update(label, -1.0)
       leftCount += 1.0
       rightCount -= 1.0
+      j += 1
     }
 
     val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
@@ -764,14 +790,17 @@ private[ml] object AltDT extends Logging {
       fromOffset: Int,
       toOffset: Int,
       split: Split): BitSubvector = {
-    val nodeRowIndices = col.indices.view.slice(fromOffset, toOffset).toArray
-    val nodeRowValues = col.values.view.slice(fromOffset, toOffset).toArray
+    val nodeRowIndices = col.indices.slice(fromOffset, toOffset)
+    val nodeRowValues = col.values.slice(fromOffset, toOffset)
     val nodeRowValuesSortedByIndices = nodeRowIndices.zip(nodeRowValues).sortBy(_._1).map(_._2)
     val bitv = new BitSubvector(fromOffset, toOffset)
-    nodeRowValuesSortedByIndices.zipWithIndex.foreach { case (value, i) =>
+    var i = 0
+    while (i < nodeRowValuesSortedByIndices.length) {
+      val value = nodeRowValuesSortedByIndices(i)
       if (!split.shouldGoLeft(value)) {
         bitv.set(fromOffset + i)
       }
+      i += 1
     }
     bitv
   }
