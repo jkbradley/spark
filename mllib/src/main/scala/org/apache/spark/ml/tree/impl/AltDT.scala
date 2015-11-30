@@ -823,7 +823,9 @@ private[ml] object AltDT extends Logging {
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
       val newActiveNodes = new BitSet(newNumNodeOffsets - 1)
       var newNodeOffsetsIdx = 0
-      newNodeOffsets.foreach { offsets =>
+      var i = 0
+      while (i < newNodeOffsets.length) {
+        val offsets = newNodeOffsets(i)
         if (offsets.length == 2) {
           newActiveNodes.set(newNodeOffsetsIdx)
           newActiveNodes.set(newNodeOffsetsIdx + 1)
@@ -831,10 +833,9 @@ private[ml] object AltDT extends Logging {
         } else {
           newNodeOffsetsIdx += 1
         }
+        i += 1
       }
-
       PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
     }
   }
-
 }
