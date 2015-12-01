@@ -231,9 +231,45 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(stats.valid)
   }
 
-  //  test("chooseUnorderedCategoricalSplit: basic case") { }
+  test("chooseUnorderedCategoricalSplit: basic case") {
+    val featureIndex = 0
+    val featureArity = 4
+    val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
+    val labels = Seq(0.0, 0.0, 1.0, 1.0, 1.0)
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+    val (split, stats) = AltDT.chooseUnorderedCategoricalSplit(
+      featureIndex, values, labels, metadata, featureArity)
+    split match {
+      case Some(s: CategoricalSplit) =>
+        assert(s.featureIndex === featureIndex)
+        assert(s.leftCategories.toSet === Set(0.0, 2.0))
+        assert(s.rightCategories.toSet === Set(1.0, 3.0))
+        // TODO: test correctness of stats
+      case _ =>
+        throw new AssertionError(
+          s"Expected CategoricalSplit but got ${split.getClass.getSimpleName}")
+    }
+  }
 
-  //  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") { }
+  test("chooseUnorderedCategoricalSplit: return bad split if we should not split") {
+    val featureIndex = 0
+    val featureArity = 4
+    val values = Seq(3.0, 1.0, 0.0, 2.0, 2.0)
+    val labels = Seq(1.0, 1.0, 1.0, 1.0, 1.0)
+    val impurity = Entropy
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
+    val (split, stats) =
+      AltDT.chooseOrderedCategoricalSplit(featureIndex, values, labels, metadata, featureArity)
+    assert(split.isEmpty)
+    val fullImpurityStatsArray =
+      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+    assert(stats.gain === 0.0)
+    assert(stats.impurity === fullImpurity)
+    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+    assert(stats.valid)
+  }
 
   test("chooseContinuousSplit: basic case") {
     val featureIndex = 0
