@@ -87,9 +87,8 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] object AltDTMetadata {
-    def fromStrategy(strategy: Strategy): AltDTMetadata =
-      new AltDTMetadata(strategy.numClasses, strategy.maxBins, strategy.minInfoGain,
-      strategy.impurity)
+    def fromStrategy(strategy: Strategy): AltDTMetadata = new AltDTMetadata(strategy.numClasses,
+      strategy.maxBins, strategy.minInfoGain, strategy.impurity)
   }
 
   /**
@@ -144,8 +143,8 @@ private[ml] object AltDT extends Logging {
     // Group columns together into one array of columns per partition.
     // TODO: Test avoiding this grouping, and see if it matters.
     val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions {
-    iterator: Iterator[FeatureVector] =>
-      if (iterator.nonEmpty) Iterator(iterator.toArray) else Iterator()
+      iterator: Iterator[FeatureVector] =>
+        if (iterator.nonEmpty) Iterator(iterator.toArray) else Iterator()
     }
     groupedColStore.persist(StorageLevel.MEMORY_AND_DISK)
 
@@ -254,7 +253,7 @@ private[ml] object AltDT extends Logging {
     //     where the best split is None if no useful split exists
     val partBestSplitsAndGains: RDD[Array[(Option[Split], ImpurityStats)]] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
-      activeNodes: BitSet) =>
+          activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
         activeNodes.iterator.map { nodeIndexInLevel: Int =>
