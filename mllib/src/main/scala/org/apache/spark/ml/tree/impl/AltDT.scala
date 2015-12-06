@@ -839,32 +839,29 @@ private[ml] object AltDT extends Logging {
         activeNodes.iterator.foreach { nodeIdx =>
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
-          // If there are no more BitVectors, then this node was not split.
-          // TODO: Improve somewhat awkward handling of this case, where curBitVecIdx
-          //       will stay stuck at bitVectors.length
-          if (curBitVecIdx < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+          if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+            // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+            // which is acceptable (since it will not cover further nodes which were not split).
             curBitVecIdx += 1
           }
-          if (curBitVecIdx < bitVectors.length) {
-            val curBitVector = bitVectors(curBitVecIdx)
-            // If the current BitVector does not cover this node, then this node was not split,
-            // so we do not need to update its part of the column.  Otherwise, we update it.
-            if (curBitVector.from <= from && to <= curBitVector.to) {
-              // Sort range [from, to) based on indices.  This is required to match the bit vector
-              // across all workers.  See [[bitSubvectorFromSplit]] for details.
-              val rangeIndices = col.indices.view.slice(from, to).toArray
-              val rangeValues = col.values.view.slice(from, to).toArray
-              val sortedRange = rangeIndices.zip(rangeValues).sortBy(_._1)
-              // Sort range [from, to) based on bit vector.
-              sortedRange.zipWithIndex.map { case ((idx, value), i) =>
-                val bit = curBitVector.get(from + i)
-                // TODO: In-place merge, rather than general sort.
-                // TODO: We don't actually need to sort the categorical features using our approach.
-                (bit, value, idx)
-              }.sorted.zipWithIndex.foreach { case ((bit, value, idx), i) =>
-                col.values(from + i) = value
-                col.indices(from + i) = idx
-              }
+          val curBitVector = bitVectors(curBitVecIdx)
+          // If the current BitVector does not cover this node, then this node was not split,
+          // so we do not need to update its part of the column.  Otherwise, we update it.
+          if (curBitVector.from <= from && to <= curBitVector.to) {
+            // Sort range [from, to) based on indices.  This is required to match the bit vector
+            // across all workers.  See [[bitSubvectorFromSplit]] for details.
+            val rangeIndices = col.indices.view.slice(from, to).toArray
+            val rangeValues = col.values.view.slice(from, to).toArray
+            val sortedRange = rangeIndices.zip(rangeValues).sortBy(_._1)
+            // Sort range [from, to) based on bit vector.
+            sortedRange.zipWithIndex.map { case ((idx, value), i) =>
+              val bit = curBitVector.get(from + i)
+              // TODO: In-place merge, rather than general sort.
+              // TODO: We don't actually need to sort the categorical features using our approach.
+              (bit, value, idx)
+            }.sorted.zipWithIndex.foreach { case ((bit, value, idx), i) =>
+              col.values(from + i) = value
+              col.indices(from + i) = idx
             }
           }
         }
@@ -878,27 +875,25 @@ private[ml] object AltDT extends Logging {
       activeNodes.iterator.foreach { nodeIdx =>
         val from = nodeOffsets(nodeIdx)
         val to = nodeOffsets(nodeIdx + 1)
-        // If there are no more BitVectors, then this node was not split.
-        // TODO: Improve somewhat awkward handling of this case, where curBitVecIdx
-        //       will stay stuck at bitVectors.length
-        if (curBitVecIdx < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+        if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+          // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+          // which is acceptable (since it will not cover further nodes which were not split).
           curBitVecIdx += 1
         }
-        if (curBitVecIdx < bitVectors.length) {
-          val curBitVector = bitVectors(curBitVecIdx)
-          // If the current BitVector does not cover this node, then this node was not split,
-          // so we do not need to create a new node offset.  Otherwise, we create an offset.
-          if (curBitVector.from <= from && to <= curBitVector.to) {
-            // Count number of values splitting to left vs. right
-            val numRight = Range(from, to).count(curBitVector.get)
-            val numLeft = to - from - numRight
-            if (numLeft != 0 && numRight != 0) {
-              // node is split
-              val oldOffset = newNodeOffsets(nodeIdx).head
-              newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
-            }
+        val curBitVector = bitVectors(curBitVecIdx)
+        // If the current BitVector does not cover this node, then this node was not split,
+        // so we do not need to create a new node offset.  Otherwise, we create an offset.
+        if (curBitVector.from <= from && to <= curBitVector.to) {
+          // Count number of values splitting to left vs. right
+          val numRight = Range(from, to).count(curBitVector.get)
+          val numLeft = to - from - numRight
+          if (numLeft != 0 && numRight != 0) {
+            // node is split
+            val oldOffset = newNodeOffsets(nodeIdx).head
+            newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
           }
         }
+
       }
 
       assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
