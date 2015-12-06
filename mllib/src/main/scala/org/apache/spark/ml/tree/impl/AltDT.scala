@@ -893,7 +893,6 @@ private[ml] object AltDT extends Logging {
             newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
           }
         }
-
       }
 
       assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
