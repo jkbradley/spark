@@ -839,8 +839,11 @@ private[ml] object AltDT extends Logging {
         activeNodes.iterator.foreach { nodeIdx =>
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
-          // TODO: Allow missing vectors when no split is chosen.
-          if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
+          if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+            // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+            // which is acceptable (since it will not cover further nodes which were not split).
+            curBitVecIdx += 1
+          }
           val curBitVector = bitVectors(curBitVecIdx)
           // If the current BitVector does not cover this node, then this node was not split,
           // so we do not need to update its part of the column.  Otherwise, we update it.
@@ -872,7 +875,11 @@ private[ml] object AltDT extends Logging {
       activeNodes.iterator.foreach { nodeIdx =>
         val from = nodeOffsets(nodeIdx)
         val to = nodeOffsets(nodeIdx + 1)
-        if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
+        if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+          // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+          // which is acceptable (since it will not cover further nodes which were not split).
+          curBitVecIdx += 1
+        }
         val curBitVector = bitVectors(curBitVecIdx)
         // If the current BitVector does not cover this node, then this node was not split,
         // so we do not need to create a new node offset.  Otherwise, we create an offset.
