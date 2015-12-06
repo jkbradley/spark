@@ -56,7 +56,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val data = Range(0, 8).map(x => LabeledPoint(x, Vectors.dense(x)))
     val df = sqlContext.createDataFrame(data)
     val dt = new DecisionTreeRegressor()
-      .setFeaturesCol("features") // indexedFeatures
+      .setFeaturesCol("features")
       .setLabelCol("label")
       .setMaxDepth(10)
       .setAlgorithm("byCol")
@@ -68,6 +68,28 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val right = root.rightChild.asInstanceOf[InternalNode]
     val grandkids = Array(left.leftChild, left.rightChild, right.leftChild, right.rightChild)
     assert(grandkids.forall(_.isInstanceOf[InternalNode]))
+  }
+
+  test("example with imbalanced tree") {
+    val data = Seq(
+      (0.0, Vectors.dense(0.0, 0.0)),
+      (0.0, Vectors.dense(0.0, 0.0)),
+      (1.0, Vectors.dense(0.0, 1.0)),
+      (0.0, Vectors.dense(0.0, 1.0)),
+      (1.0, Vectors.dense(1.0, 0.0)),
+      (1.0, Vectors.dense(1.0, 0.0)),
+      (1.0, Vectors.dense(1.0, 1.0)),
+      (1.0, Vectors.dense(1.0, 1.0))
+    ).map { case (l, p) => LabeledPoint(l, p) }
+    val df = sqlContext.createDataFrame(data)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features")
+      .setLabelCol("label")
+      .setMaxDepth(5)
+      .setAlgorithm("byCol")
+    val model = dt.fit(df)
+    assert(model.depth === 2)
+    assert(model.numNodes === 5)
   }
 
   //////////////////////////////// Helper classes //////////////////////////////////
