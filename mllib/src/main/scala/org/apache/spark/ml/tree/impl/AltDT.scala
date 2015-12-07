@@ -87,8 +87,8 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] object AltDTMetadata {
-    def fromStrategy(strategy: Strategy) = new AltDTMetadata(strategy.numClasses, strategy.maxBins,
-      strategy.minInfoGain, strategy.impurity)
+    def fromStrategy(strategy: Strategy): AltDTMetadata = new AltDTMetadata(strategy.numClasses,
+      strategy.maxBins, strategy.minInfoGain, strategy.impurity)
   }
 
   /**
@@ -100,7 +100,7 @@ private[ml] object AltDT extends Logging {
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
     val rootNode = trainImpl(input, strategy)
-    RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
+    impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
@@ -142,8 +142,9 @@ private[ml] object AltDT extends Logging {
     }
     // Group columns together into one array of columns per partition.
     // TODO: Test avoiding this grouping, and see if it matters.
-    val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions { iterator: Iterator[FeatureVector] =>
-      if (iterator.nonEmpty) Iterator(iterator.toArray) else Iterator()
+    val groupedColStore: RDD[Array[FeatureVector]] = colStore.mapPartitions {
+      iterator: Iterator[FeatureVector] =>
+        if (iterator.nonEmpty) Iterator(iterator.toArray) else Iterator()
     }
     groupedColStore.persist(StorageLevel.MEMORY_AND_DISK)
 
@@ -201,7 +202,9 @@ private[ml] object AltDT extends Logging {
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
         }
-        newPartitionInfos.cache().count() // TODO: remove.  For some reason, this is needed to make things work.  Probably messing up somewhere above...
+        // TODO: remove.  For some reason, this is needed to make things work.
+        // Probably messing up somewhere above...
+        newPartitionInfos.cache().count()
         partitionInfos = newPartitionInfos
 
         // TODO: unpersist aggBitVectorsBc after action.
@@ -249,7 +252,8 @@ private[ml] object AltDT extends Logging {
     //   for each active node, best split + info gain,
     //     where the best split is None if no useful split exists
     val partBestSplitsAndGains: RDD[Array[(Option[Split], ImpurityStats)]] = partitionInfos.map {
-      case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int], activeNodes: BitSet) =>
+      case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
+          activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
         activeNodes.iterator.map { nodeIndexInLevel: Int =>
@@ -518,12 +522,114 @@ private[ml] object AltDT extends Logging {
     }
   }
 
+  /**
+   * Find the best split for an unordered categorical feature at a single node.
+   *
+   * Algorithm:
+   *  - Considers all possible subsets (exponentially many)
+   *
+   * @param featureIndex  Index of feature being split.
+   * @param values  Feature values at this node.  Sorted in increasing order.
+   * @param labels  Labels corresponding to values, in the same order.
+   * @return  (best split, statistics for split)  If the best split actually puts all instances
+   *          in one leaf node, then it will be set to None.  The impurity stats maybe still be
+   *          useful, so they are returned.
+   */
   private[impl] def chooseUnorderedCategoricalSplit(
       featureIndex: Int,
       values: Seq[Double],
       labels: Seq[Double],
       metadata: AltDTMetadata,
-      featureArity: Int): (Option[Split], ImpurityStats) = ???
+      featureArity: Int): (Option[Split], ImpurityStats) = {
+
+    // Label stats for each category
+    val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
+      _ => metadata.createImpurityAggregator())
+    values.zip(labels).foreach { case (cat, label) =>
+      // NOTE: we assume the values for categorical features are Ints in [0,featureArity)
+      aggStats(cat.toInt).update(label)
+    }
+
+    // Aggregated statistics for left part of split and entire split.
+    val leftImpurityAgg = metadata.createImpurityAggregator()
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    aggStats.foreach(fullImpurityAgg.add)
+    val fullImpurity = fullImpurityAgg.getCalculator.calculate()
+
+    if (featureArity == 1) {
+      // All instances go right
+      val impurityStats = new ImpurityStats(0.0, fullImpurityAgg.getCalculator.calculate(),
+        fullImpurityAgg.getCalculator, leftImpurityAgg.getCalculator,
+        fullImpurityAgg.getCalculator)
+      (None, impurityStats)
+    } else {
+      //  TODO: We currently add and remove the stats for all categories for each split.
+      //  A better way to do it would be to consider splits in an order such that each iteration
+      //  only requires addition/removal of a single category and a single add/subtract to
+      //  leftCount and rightCount.
+      //  TODO: Use more efficient encoding such as gray codes
+      val splits: Array[CategoricalSplit] = findSplits(featureIndex, featureArity, metadata)
+      var bestSplit: Option[CategoricalSplit] = None
+      val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+      var bestGain: Double = -1.0
+      val fullCount: Double = values.size
+      for (split <- splits) {
+        // Update left, right impurity stats
+        split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
+        val rightImpurityAgg = fullImpurityAgg.deepCopy().subtract(leftImpurityAgg)
+        val leftCount = leftImpurityAgg.getCount
+        val rightCount = rightImpurityAgg.getCount
+        // Compute impurity
+        val leftWeight = leftCount / fullCount
+        val rightWeight = rightCount / fullCount
+        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
+        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
+        if (gain > bestGain && gain > metadata.minInfoGain) {
+          bestSplit = Some(split)
+          leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+          bestGain = gain
+        }
+        // Reset left impurity stats
+        leftImpurityAgg.clear()
+      }
+
+      val bestFeatureSplit = bestSplit match {
+        case Some(split) => Some(
+          new CategoricalSplit(featureIndex, split.leftCategories, featureArity))
+        case None => None
+
+      }
+      val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
+      val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity,
+        fullImpurityAgg.getCalculator, bestLeftImpurityAgg.getCalculator,
+        bestRightImpurityAgg.getCalculator)
+      (bestFeatureSplit, bestImpurityStats)
+    }
+  }
+
+  /**
+   * Returns all possible subsets of features for categorical splits.
+   */
+  private def findSplits(
+      featureIndex: Int,
+      featureArity: Int,
+      metadata: AltDTMetadata): Array[CategoricalSplit] = {
+    // Unordered features
+    // 2^(featureArity - 1) - 1 combinations
+    val numSplits = (1 << (featureArity - 1)) - 1
+    val splits = new Array[CategoricalSplit](numSplits)
+
+    var splitIndex = 0
+    while (splitIndex < numSplits) {
+      val categories: List[Double] =
+        RandomForest.extractMultiClassCategories(splitIndex + 1, featureArity)
+      splits(splitIndex) =
+        new CategoricalSplit(featureIndex, categories.toArray, featureArity)
+      splitIndex += 1
+    }
+    splits
+  }
 
   /**
    * Choose splitting rule: feature value <= threshold
@@ -733,8 +839,11 @@ private[ml] object AltDT extends Logging {
         activeNodes.iterator.foreach { nodeIdx =>
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
-          // TODO: Allow missing vectors when no split is chosen.
-          if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
+          if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+            // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+            // which is acceptable (since it will not cover further nodes which were not split).
+            curBitVecIdx += 1
+          }
           val curBitVector = bitVectors(curBitVecIdx)
           // If the current BitVector does not cover this node, then this node was not split,
           // so we do not need to update its part of the column.  Otherwise, we update it.
@@ -766,7 +875,11 @@ private[ml] object AltDT extends Logging {
       activeNodes.iterator.foreach { nodeIdx =>
         val from = nodeOffsets(nodeIdx)
         val to = nodeOffsets(nodeIdx + 1)
-        if (bitVectors(curBitVecIdx).to <= from) curBitVecIdx += 1
+        if (curBitVecIdx + 1 < bitVectors.length && bitVectors(curBitVecIdx).to <= from) {
+          // If there are no more BitVectors, curBitVecIdx stays at the last bitVector,
+          // which is acceptable (since it will not cover further nodes which were not split).
+          curBitVecIdx += 1
+        }
         val curBitVector = bitVectors(curBitVecIdx)
         // If the current BitVector does not cover this node, then this node was not split,
         // so we do not need to create a new node offset.  Otherwise, we create an offset.
