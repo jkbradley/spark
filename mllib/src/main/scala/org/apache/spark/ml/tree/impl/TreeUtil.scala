@@ -60,12 +60,14 @@ private[tree] object TreeUtil {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
     val numCols = rowStore.take(1)(0).size
-    val numSourcePartitions = rowStore.partitions.length
-    val numTargetPartitions = Math.min(numCols, numSourcePartitions)
-    if (numTargetPartitions == 0) {
+    if (numCols == 0) {
       return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
     }
-    val maxColumnsPerPartition = Math.floor(numCols / (numTargetPartitions + 0.0)).toInt
+
+    val numSourcePartitions = rowStore.partitions.length
+    val approxNumTargetPartitions = Math.min(numCols, numSourcePartitions)
+    val maxColumnsPerPartition = Math.ceil(numCols / approxNumTargetPartitions.toDouble).toInt
+    val numTargetPartitions = Math.ceil(numCols / maxColumnsPerPartition.toDouble).toInt
 
     def getNumColsInGroup(groupIndex: Int) = {
       if (groupIndex + 1 < numTargetPartitions) {
