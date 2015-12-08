@@ -166,6 +166,7 @@ private[ml] object AltDT extends Logging {
     var currentLevel = 0
     var doneLearning = false
     while (currentLevel < strategy.maxDepth && !doneLearning) {
+      println(s"CURRENT LEVEL: $currentLevel")
       // Compute best split for each active node.
       val bestSplitsAndGains: Array[(Option[Split], ImpurityStats)] =
         computeBestSplits(partitionInfos, labelsBc, metadata)
@@ -181,10 +182,13 @@ private[ml] object AltDT extends Logging {
       // Note: This flatMap has side effects (on the model).
       activeNodePeriphery =
         computeActiveNodePeriphery(activeNodePeriphery, bestSplitsAndGains, strategy.getMinInfoGain)
+      println(s"NEW ACTIVE NODE PERIPHERY: ${activeNodePeriphery.length}")
       // We keep all old nodeOffsets and add one for each node split.
       // Each node split adds 2 nodes to activeNodePeriphery.
       // TODO: Should this be calculated after filtering for impurity??
+      println(s"PREVIOUS numNodeOffsets: $numNodeOffsets")
       numNodeOffsets = numNodeOffsets + activeNodePeriphery.length / 2
+      println(s"UPDATED numNodeOffsets: $numNodeOffsets")
 
       // Filter active node periphery by impurity.
       val estimatedRemainingActive = activeNodePeriphery.count(_.stats.impurity > 0.0)
@@ -269,7 +273,7 @@ private[ml] object AltDT extends Logging {
 
     // TODO: treeReduce
     // Aggregate best split for each active node.
-    partBestSplitsAndGains.reduce { case (splitsGains1, splitsGains2) =>
+    partBestSplitsAndGains.treeReduce { case (splitsGains1, splitsGains2) =>
       splitsGains1.zip(splitsGains2).map { case ((split1, gain1), (split2, gain2)) =>
         if (gain1.gain >= gain2.gain) {
           (split1, gain1)
@@ -895,9 +899,12 @@ private[ml] object AltDT extends Logging {
         }
       }
 
-      assert(newNodeOffsets.map(_.length).sum == newNumNodeOffsets,
-        s"(W) newNodeOffsets total size: ${newNodeOffsets.map(_.length).sum}," +
+      val newNodeOffsetsCount = newNodeOffsets.map(_.length).sum
+      assert(newNodeOffsetsCount == newNumNodeOffsets,
+        s"(W) newNodeOffsets total size: $newNodeOffsetsCount," +
           s" newNumNodeOffsets: $newNumNodeOffsets")
+      println(s"newNodeOffsets total size: $newNodeOffsetsCount," +
+        s" newNumNodeOffsets: $newNumNodeOffsets")
 
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
       val newActiveNodes = new BitSet(newNumNodeOffsets - 1)

@@ -92,6 +92,36 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(model.numNodes === 5)
   }
 
+  test("example with more imbalanced tree") {
+    val data = Seq(
+      (0.0, Vectors.dense(0, 0, 0, 0)),
+      (0.0, Vectors.dense(0, 0, 0, 1)),
+      (0.0, Vectors.dense(0, 0, 1, 0)),
+      (0.0, Vectors.dense(0, 0, 1, 1)),
+      (0.0, Vectors.dense(0, 1, 0, 0)),
+      (1.0, Vectors.dense(0, 1, 0, 1)),
+      (0.0, Vectors.dense(0, 1, 1, 0)),
+      (0.0, Vectors.dense(0, 1, 1, 1)),
+      (1.0, Vectors.dense(1, 0, 0, 0)),
+      (1.0, Vectors.dense(1, 0, 0, 1)),
+      (1.0, Vectors.dense(1, 0, 1, 0)),
+      (0.0, Vectors.dense(1, 0, 1, 1)),
+      (1.0, Vectors.dense(1, 1, 0, 0)),
+      (1.0, Vectors.dense(1, 1, 0, 1)),
+      (1.0, Vectors.dense(1, 1, 1, 0)),
+      (1.0, Vectors.dense(1, 1, 1, 1))
+    ).map { case (l, p) => LabeledPoint(l, p) }
+    val df = sqlContext.createDataFrame(data).repartition(3)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features")
+      .setLabelCol("label")
+      .setMaxDepth(5)
+      .setAlgorithm("byCol")
+      .setMinInfoGain(0.000001)
+    val model = dt.fit(df)
+    println(model.toDebugString)
+  }
+
   //////////////////////////////// Helper classes //////////////////////////////////
 
   test("FeatureVector") {
