@@ -508,11 +508,7 @@ private[ml] object AltDT extends Logging {
       val leftImpurity = leftImpurityAgg.getCalculator.calculate()
       val rightImpurity = rightImpurityAgg.getCalculator.calculate()
       val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-      if (gain > bestGain && gain > metadata.minInfoGain) {
-        if (leftCount == 0 || rightCount == 0) {
-          throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
-            s" gain=$gain")
-        }
+      if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
         bestSplitIndex = sortedCatIndex
         leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
         bestGain = gain
@@ -599,11 +595,7 @@ private[ml] object AltDT extends Logging {
         val leftImpurity = leftImpurityAgg.getCalculator.calculate()
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-        if (gain > bestGain && gain > metadata.minInfoGain) {
-          if (leftCount == 0 || rightCount == 0) {
-            throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
-              s" gain=$gain")
-          }
+        if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestSplit = Some(split)
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
@@ -681,11 +673,7 @@ private[ml] object AltDT extends Logging {
         val leftImpurity = leftImpurityAgg.getCalculator.calculate()
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
-        if (gain > bestGain && gain > metadata.minInfoGain) {
-          if (leftCount == 0 || rightCount == 0) {
-            throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
-              s" gain=$gain")
-          }
+        if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestThreshold = currentThreshold
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
