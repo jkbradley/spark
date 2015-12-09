@@ -900,13 +900,6 @@ private[ml] object AltDT extends Logging {
       }
 
       val newNodeOffsetsCount = newNodeOffsets.map(_.length).sum
-      assert(newNodeOffsetsCount == newNumNodeOffsets,
-        s"(W) newNodeOffsets total size: $newNodeOffsetsCount," +
-          s" newNumNodeOffsets: $newNumNodeOffsets")
-      println(s"newNodeOffsets total size: $newNodeOffsetsCount," +
-        s" newNumNodeOffsets: $newNumNodeOffsets," +
-        s" newNodeOffsets.head: ${newNodeOffsets.head.mkString(",")}" +
-        s" newNodeOffsets.last: ${newNodeOffsets.last.mkString(",")}")
 
       // Identify the new activeNodes based on the 2-level representation of the new nodeOffsets.
       val newActiveNodes = new BitSet(newNumNodeOffsets - 1)
@@ -920,6 +913,20 @@ private[ml] object AltDT extends Logging {
           newNodeOffsetsIdx += 1
         }
       }
+
+      println(s"newNodeOffsets total size: $newNodeOffsetsCount," +
+        s" newNumNodeOffsets: $newNumNodeOffsets," +
+        s" newNodeOffsets.head: ${newNodeOffsets.head.mkString(",")}" +
+        s" newNodeOffsets.last: ${newNodeOffsets.last.mkString(",")}")
+      logWarning(s"newNodeOffsets total size: $newNodeOffsetsCount," +
+        s" newNumNodeOffsets: $newNumNodeOffsets," +
+        s" newNodeOffsets.head: ${newNodeOffsets.head.mkString(",")}" +
+        s" newNodeOffsets.last: ${newNodeOffsets.last.mkString(",")}")
+      logWarning(s"newActiveNodes: " + newActiveNodes.iterator.mkString(", "))
+
+      assert(newNodeOffsetsCount == newNumNodeOffsets,
+        s"(W) newNodeOffsets total size: $newNodeOffsetsCount," +
+          s" newNumNodeOffsets: $newNumNodeOffsets")
 
       PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
     }
