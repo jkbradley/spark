@@ -509,6 +509,10 @@ private[ml] object AltDT extends Logging {
       val rightImpurity = rightImpurityAgg.getCalculator.calculate()
       val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
       if (gain > bestGain && gain > metadata.minInfoGain) {
+        if (leftCount == 0 || rightCount == 0) {
+          throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
+            s" gain=$gain")
+        }
         bestSplitIndex = sortedCatIndex
         leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
         bestGain = gain
@@ -581,7 +585,7 @@ private[ml] object AltDT extends Logging {
       val splits: Array[CategoricalSplit] = findSplits(featureIndex, featureArity, metadata)
       var bestSplit: Option[CategoricalSplit] = None
       val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
-      var bestGain: Double = -1.0
+      var bestGain: Double = 0.0
       val fullCount: Double = values.size
       for (split <- splits) {
         // Update left, right impurity stats
@@ -596,6 +600,10 @@ private[ml] object AltDT extends Logging {
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (gain > bestGain && gain > metadata.minInfoGain) {
+          if (leftCount == 0 || rightCount == 0) {
+            throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
+              s" gain=$gain")
+          }
           bestSplit = Some(split)
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
@@ -674,6 +682,10 @@ private[ml] object AltDT extends Logging {
         val rightImpurity = rightImpurityAgg.getCalculator.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (gain > bestGain && gain > metadata.minInfoGain) {
+          if (leftCount == 0 || rightCount == 0) {
+            throw new Exception(s"Found leftCount=$leftCount, rightCount=$rightCount, but" +
+              s" gain=$gain")
+          }
           bestThreshold = currentThreshold
           leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
           bestGain = gain
