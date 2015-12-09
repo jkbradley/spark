@@ -182,7 +182,8 @@ private[ml] object AltDT extends Logging {
       // Note: This flatMap has side effects (on the model).
       activeNodePeriphery =
         computeActiveNodePeriphery(activeNodePeriphery, bestSplitsAndGains, strategy.getMinInfoGain)
-      println(s"NEW ACTIVE NODE PERIPHERY: ${activeNodePeriphery.length}")
+      println()
+      println(s"NEW ACTIVE NODE PERIPHERY LENGTH: ${activeNodePeriphery.length}")
       // We keep all old nodeOffsets and add one for each node split.
       // Each node split adds 2 nodes to activeNodePeriphery.
       // TODO: Should this be calculated after filtering for impurity??
@@ -298,10 +299,14 @@ private[ml] object AltDT extends Logging {
       oldPeriphery: Array[LearningNode],
       bestSplitsAndGains: Array[(Option[Split], ImpurityStats)],
       minInfoGain: Double): Array[LearningNode] = {
+    print(s"SPLIT NODES: ")
+    var i = 0
     bestSplitsAndGains.zipWithIndex.flatMap {
       case ((split, stats), nodeIdx) =>
         val node = oldPeriphery(nodeIdx)
         if (split.nonEmpty && stats.gain > minInfoGain) {
+          print(s"$i, ")
+          i = i + 1
           // TODO: remove node id
           node.leftChild = Some(LearningNode(node.id * 2, isLeaf = false,
             ImpurityStats(stats.leftImpurity, stats.leftImpurityCalculator)))
@@ -313,6 +318,7 @@ private[ml] object AltDT extends Logging {
           Iterator(node.leftChild.get, node.rightChild.get)
         } else {
           node.isLeaf = true
+          i = i + 1
           Iterator()
         }
     }
@@ -874,6 +880,7 @@ private[ml] object AltDT extends Logging {
 
       // Create a 2-level representation of the new nodeOffsets (to be flattened).
       // These 2 levels correspond to original nodes and their children (if split).
+      print(s"SPLIT NODES: ")
       val newNodeOffsets = nodeOffsets.map(Array(_))
       var curBitVecIdx = 0
       activeNodes.iterator.foreach { nodeIdx =>
@@ -893,11 +900,13 @@ private[ml] object AltDT extends Logging {
           val numLeft = to - from - numRight
           if (numLeft != 0 && numRight != 0) {
             // node is split
+            print(s"$nodeIdx, ")
             val oldOffset = newNodeOffsets(nodeIdx).head
             newNodeOffsets(nodeIdx) = Array(oldOffset, oldOffset + numLeft)
           }
         }
       }
+      println()
 
       val newNodeOffsetsCount = newNodeOffsets.map(_.length).sum
 
