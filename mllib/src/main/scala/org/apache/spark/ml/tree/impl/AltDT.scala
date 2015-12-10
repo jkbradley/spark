@@ -273,9 +273,8 @@ private[ml] object AltDT extends Logging {
         toReturn
     }
 
-    // TODO: treeReduce
     // Aggregate best split for each active node.
-    partBestSplitsAndGains.reduce { case (splitsGains1, splitsGains2) =>
+    partBestSplitsAndGains.treeReduce { case (splitsGains1, splitsGains2) =>
       splitsGains1.zip(splitsGains2).map { case ((split1, gain1), (split2, gain2)) =>
         if (gain1.gain >= gain2.gain) {
           (split1, gain1)
