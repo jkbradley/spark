@@ -99,8 +99,11 @@ private[ml] object AltDT extends Logging {
       strategy: Strategy,
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
+    // TODO: Check for empty dataset
+    val numFeatures = input.first().features.size
     val rootNode = trainImpl(input, strategy)
-    impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, parentUID)
+    impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, numFeatures,
+      parentUID)
   }
 
   private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
