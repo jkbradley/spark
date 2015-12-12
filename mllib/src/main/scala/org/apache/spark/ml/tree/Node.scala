@@ -288,8 +288,9 @@ private[tree] class LearningNode(
    * @return  Leaf index if the data point reaches a leaf.
    *          Otherwise, last node reachable in tree matching this example.
    *          Note: This is the global node index, i.e., the index used in the tree.
-   *                This index is different from the index used during training a particular
-   *                group of nodes on one call to [[findBestSplits()]].
+   *          This index is different from the index used during training a particular
+   *          group of nodes on one call to
+   *          [[org.apache.spark.ml.tree.impl.RandomForest.findBestSplits()]].
    */
   def predictImpl(binnedFeatures: Array[Int], splits: Array[Array[Split]]): Int = {
     if (this.isLeaf || this.split.isEmpty) {
