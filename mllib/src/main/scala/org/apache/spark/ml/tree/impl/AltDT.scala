@@ -29,6 +29,7 @@ import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.collection.BitSet
+import org.roaringbitmap.RoaringBitmap
 
 
 /**
@@ -199,7 +200,7 @@ private[ml] object AltDT extends Logging {
         val splits: Array[Option[Split]] = bestSplitsAndGains.map(_._1)
 
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right
-        val aggBitVector: BitSet = aggregateBitVector(partitionInfos, splits, numRows)
+        val aggBitVector: RoaringBitmap = aggregateBitVector(partitionInfos, splits, numRows)
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVector, numNodeOffsets)
         }
@@ -332,17 +333,17 @@ private[ml] object AltDT extends Logging {
   private[impl] def aggregateBitVector(
       partitionInfos: RDD[PartitionInfo],
       bestSplits: Array[Option[Split]],
-      numRows: Int): BitSet = {
+      numRows: Int): RoaringBitmap = {
     val bestSplitsBc: Broadcast[Array[Option[Split]]] =
       partitionInfos.sparkContext.broadcast(bestSplits)
-    val workerBitSubvectors: RDD[BitSet] = partitionInfos.map {
+    val workerBitSubvectors: RDD[RoaringBitmap] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
                          activeNodes: BitSet) =>
         val localBestSplits: Array[Option[Split]] = bestSplitsBc.value
         // localFeatureIndex[feature index] = index into PartitionInfo.columns
         val localFeatureIndex: Map[Int, Int] = columns.map(_.featureIndex).zipWithIndex.toMap
-        val bitSetForNodes: Iterator[BitSet] = activeNodes.iterator.zip(localBestSplits.iterator).
-        flatMap {
+        val bitSetForNodes: Iterator[RoaringBitmap] = activeNodes.iterator
+          .zip(localBestSplits.iterator).flatMap {
           case (nodeIndexInLevel: Int, Some(split: Split)) =>
             if (localFeatureIndex.contains(split.featureIndex)) {
               // This partition has the column (feature) used for this split.
@@ -360,13 +361,14 @@ private[ml] object AltDT extends Logging {
             Iterator()
         }
         if (bitSetForNodes.isEmpty) {
-          new BitSet(0)
+          new RoaringBitmap()
         } else {
-          bitSetForNodes.reduce[BitSet]((acc: BitSet, bitv: BitSet) => acc | bitv)
+          bitSetForNodes.reduce[RoaringBitmap] { (acc, bitv) => acc.or(bitv); acc }
         }
     }
-    val aggBitVector: BitSet = workerBitSubvectors.reduce { (acc: BitSet, bitv: BitSet) =>
-      acc | bitv
+    val aggBitVector: RoaringBitmap = workerBitSubvectors.reduce { (acc, bitv) =>
+      acc.or(bitv)
+      acc
     }
     bestSplitsBc.unpersist()
     aggBitVector
@@ -797,16 +799,16 @@ private[ml] object AltDT extends Logging {
       fromOffset: Int,
       toOffset: Int,
       split: Split,
-      numRows: Int): BitSet = {
+      numRows: Int): RoaringBitmap = {
     val nodeRowIndices = col.indices.slice(fromOffset, toOffset)
     val nodeRowValues = col.values.slice(fromOffset, toOffset)
-    val bitv = new BitSet(numRows)
+    val bitv = new RoaringBitmap()
     var i = 0
     while (i < nodeRowValues.length) {
       val value = nodeRowValues(i)
       val idx = nodeRowIndices(i)
       if (!split.shouldGoLeft(value)) {
-        bitv.set(idx)
+        bitv.add(idx)
       }
       i += 1
     }
@@ -867,7 +869,7 @@ private[ml] object AltDT extends Logging {
      *                    For instances at inactive (leaf) nodes, the value can be arbitrary.
      * @return Updated partition info
      */
-    def update(instanceBitVector: BitSet, newNumNodeOffsets: Int):
+    def update(instanceBitVector: RoaringBitmap, newNumNodeOffsets: Int):
     PartitionInfo = {
       // Create a 2-level representation of the new nodeOffsets (to be flattened).
       // These 2 levels correspond to original nodes and their children (if split).
@@ -885,8 +887,8 @@ private[ml] object AltDT extends Logging {
           // if this is the very first time we split
           // we don't have to use the indices to figure
           // out which bits are turned on
-          val numBitsSet = if (nodeOffsets.length == 2) instanceBitVector.cardinality
-                           else rangeIndices.count(instanceBitVector.get)
+          val numBitsSet = if (nodeOffsets.length == 2) instanceBitVector.getCardinality
+                           else rangeIndices.count(instanceBitVector.contains)
           val numBitsNotSet = to - from - numBitsSet
           val oldOffset = newNodeOffsets(nodeIdx).head
           // numBitsNotSet == number of instances going to the left
@@ -914,8 +916,8 @@ private[ml] object AltDT extends Logging {
             while (start < numBitsNotSet && start <= end) {
               // "start <= end" isn't really necessary, but we
               // include it anyways
-              val startBit = instanceBitVector.get(rangeIndices(start))
-              val endBit = instanceBitVector.get(rangeIndices(end))
+              val startBit = instanceBitVector.contains(rangeIndices(start))
+              val endBit = instanceBitVector.contains(rangeIndices(end))
               // if the startBit is false, we increment and move on
               if (!startBit) {
                 start += 1
