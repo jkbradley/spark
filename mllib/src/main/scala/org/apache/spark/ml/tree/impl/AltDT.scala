@@ -908,61 +908,38 @@ private[ml] object AltDT extends Logging {
             // instanceBitVector, which is ordered by index.
 
             // BEGIN SORTING
-            var start = 0
-            var end = rangeValues.length - 1
-
-            // first we move all of the values and indices that have
-            // zero-bits to the front
-            while (start < numBitsNotSet && start <= end) {
-              // "start <= end" isn't really necessary, but we
-              // include it anyways
-              val startBit = instanceBitVector.contains(rangeIndices(start))
-              val endBit = instanceBitVector.contains(rangeIndices(end))
-              // if the startBit is false, we increment and move on
-              if (!startBit) {
-                start += 1
+            // between [from, numBitsNotSet) and [numBitsNotSet, to)
+            // the columns need to be sorted by value. Since rangeValues
+            // has already been sorted by value, we iterate from beginning to end
+            // (which preserves the sorted order), and then copy the values
+            // into a temporary buffer either 1) in the [from, numBitsNotSet) range
+            // or 2) in the [numBitsNotSet, to) range.
+            val (tempVals, tempIndices) = (new Array[Double](rangeValues.length),
+                                           new Array[Int](rangeIndices.length))
+            var (leftInstanceIdx, rightInstanceIdx) = (0, numBitsNotSet)
+            var idx = 0
+            while (idx < rangeValues.length) {
+              val indexForVal = rangeIndices(idx)
+              val bit = instanceBitVector.contains(indexForVal)
+              if (bit) {
+                tempVals(rightInstanceIdx) = rangeValues(idx)
+                tempIndices(rightInstanceIdx) = indexForVal
+                rightInstanceIdx += 1
+              } else {
+                tempVals(leftInstanceIdx) = rangeValues(idx)
+                tempIndices(leftInstanceIdx) = indexForVal
+                leftInstanceIdx += 1
               }
-              // if endBit is true, we decrement and move on
-              if (endBit) {
-                end -= 1
-                // if startBit is true and endBit is false, we swap
-              } else if (startBit && !endBit) {
-                // swap both in rangeValues and in rangeIndices
-                // (this should be a separate helper function,
-                // but we want to avoid function calls)
-                val tempVal = rangeValues(start)
-                rangeValues(start) = rangeValues(end)
-                rangeValues(end) = tempVal
-                val tempIdx = rangeIndices(start)
-                rangeIndices(start) = rangeIndices(end)
-                rangeIndices(end) = tempIdx
-                // update both start and end
-                start += 1
-                end -= 1
-              }
+              idx += 1
             }
-            // Now, we sort the sub-arrays from [0, numBitsNotSet) and
-            // [numBitsNotSet, rangeValues.length)
-            val leftValsAndIndices = rangeValues.slice(0, numBitsNotSet).zip(rangeIndices.slice(0,
-              numBitsNotSet)).sorted
-            val rightValsAndIndices = rangeValues.slice(numBitsNotSet,
-              rangeValues.length).zip(rangeIndices.slice(numBitsNotSet, rangeValues.length)).sorted
-
-            val (sortedLeftRangeValues, sortedLeftRangeIndices) = leftValsAndIndices.unzip
-            val (sortedRightRangeValues, sortedRightRangeIndices) = rightValsAndIndices.unzip
-
-            val sortedRangeValues = sortedLeftRangeValues.iterator ++
-              sortedRightRangeValues.iterator
-            val sortedRangeIndices = sortedLeftRangeIndices.iterator ++
-              sortedRightRangeIndices.iterator
             // END SORTING
 
             // update the column values and indices
             // with the corresponding indices
             var i = 0
             while (i < rangeValues.length) {
-              col.values(from + i) = sortedRangeValues.next()
-              col.indices(from + i) = sortedRangeIndices.next()
+              col.values(from + i) = tempVals(i)
+              col.indices(from + i) = tempIndices(i)
               i += 1
             }
           }
