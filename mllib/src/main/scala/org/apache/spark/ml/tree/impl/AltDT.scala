@@ -841,6 +841,10 @@ private[ml] object AltDT extends Logging {
       activeNodes: BitSet)
     extends Serializable {
 
+    // pre-allocated temporary buffer that we use to sort
+    // instances in left and right children during update
+    val tempValsIndices: Array[(Double, Int)] = new Array[(Double, Int)](columns(0).values.length)
+
     /** For debugging */
     override def toString: String = {
       "PartitionInfo(" +
@@ -909,25 +913,21 @@ private[ml] object AltDT extends Logging {
 
             // BEGIN SORTING
             // between [from, numBitsNotSet) and [numBitsNotSet, to)
-            // the columns need to be sorted by value. Since rangeValues
+            // the columns need to be sorted by value. Since @rangeValues
             // has already been sorted by value, we iterate from beginning to end
             // (which preserves the sorted order), and then copy the values
             // into a temporary buffer either 1) in the [from, numBitsNotSet) range
             // or 2) in the [numBitsNotSet, to) range.
-            val (tempVals, tempIndices) = (new Array[Double](rangeValues.length),
-                                           new Array[Int](rangeIndices.length))
-            var (leftInstanceIdx, rightInstanceIdx) = (0, numBitsNotSet)
+            var (leftInstanceIdx, rightInstanceIdx) = (from, from + numBitsNotSet)
             var idx = 0
             while (idx < rangeValues.length) {
               val indexForVal = rangeIndices(idx)
               val bit = instanceBitVector.contains(indexForVal)
               if (bit) {
-                tempVals(rightInstanceIdx) = rangeValues(idx)
-                tempIndices(rightInstanceIdx) = indexForVal
+                tempValsIndices(rightInstanceIdx) = (rangeValues(idx), indexForVal)
                 rightInstanceIdx += 1
               } else {
-                tempVals(leftInstanceIdx) = rangeValues(idx)
-                tempIndices(leftInstanceIdx) = indexForVal
+                tempValsIndices(leftInstanceIdx) = (rangeValues(idx), indexForVal)
                 leftInstanceIdx += 1
               }
               idx += 1
@@ -938,8 +938,8 @@ private[ml] object AltDT extends Logging {
             // with the corresponding indices
             var i = 0
             while (i < rangeValues.length) {
-              col.values(from + i) = tempVals(i)
-              col.indices(from + i) = tempIndices(i)
+              col.values(from + i) = tempValsIndices(from + i)._1
+              col.indices(from + i) = tempValsIndices(from + i)._2
               i += 1
             }
           }
