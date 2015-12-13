@@ -27,6 +27,7 @@ import org.apache.spark.mllib.tree.impurity._
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.util.collection.BitSet
+import org.roaringbitmap.RoaringBitmap
 
 /**
  * Test suite for [[AltDT]].
@@ -69,7 +70,6 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(grandkids.forall(_.isInstanceOf[InternalNode]))
   }
 
-<<<<<<< 49991b86876c8befec6f240ba6161e9aa54fdc92
   test("example with imbalanced tree") {
     val data = Seq(
       (0.0, Vectors.dense(0.0, 0.0)),
@@ -122,9 +122,9 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
     // Create bitVector for splitting the 4 rows: L, R, L, R
     // New groups are {0, 2}, {1, 3}
-    val bitVector = new BitSet(numRows)
-    bitVector.set(1)
-    bitVector.set(3)
+    val bitVector = new RoaringBitmap()
+    bitVector.add(1)
+    bitVector.add(3)
 
     // for these tests, use the activeNodes for nodeSplitBitVector
     val newInfo = info.update(bitVector, newNumNodeOffsets = 3)
@@ -140,9 +140,9 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(newInfo.activeNodes.iterator.toSet === Set(0, 1))
 
     // Create 2 bitVectors for splitting into: 0, 2, 1, 3
-    val bitVector2 = new BitSet(numRows)
-    bitVector2.set(2) // 2 goes to the right
-    bitVector2.set(3) // 3 goes to the right
+    val bitVector2 = new RoaringBitmap()
+    bitVector2.add(2) // 2 goes to the right
+    bitVector2.add(3) // 3 goes to the right
 
     val newInfo2 = newInfo.update(bitVector2, newNumNodeOffsets = 5)
 
@@ -260,7 +260,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Seq(0.0, 0.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity)
-    val (split, stats) = AltDT.chooseUnorderedCategoricalSplit(
+    val (split, _) = AltDT.chooseUnorderedCategoricalSplit(
       featureIndex, values, labels, metadata, featureArity)
     split match {
       case Some(s: CategoricalSplit) =>
@@ -347,7 +347,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val numRows = toOffset
     val split = new ContinuousSplit(0, threshold = 0.5)
     val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
-    assert(bitv.iterator.toSet === Set(3, 4))
+    assert(bitv.toArray.toSet === Set(3, 4))
   }
 
   test("bitSubvectorFromSplit: 2 nodes") {
@@ -359,7 +359,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
       val split = new ContinuousSplit(0, threshold)
       val numRows = col.values.length
       val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
-      assert(bitv.iterator.toSet === expectedRight)
+      assert(bitv.toArray.toSet === expectedRight)
     }
     // Left child node
     checkSplit(0, 3, 0.05, Set(0, 2, 4))
@@ -382,7 +382,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = 0.5)
     val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
-    assert(bitVector.iterator.toSet === Set(3, 4))
+    assert(bitVector.toArray.toSet === Set(3, 4))
   }
 
   test("collectBitVectors with 1 vector, with tied threshold") {
@@ -396,7 +396,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = -2.0)
     val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
-    assert(bitVector.iterator.toSet === Set(0, 1, 4, 5))
+    assert(bitVector.toArray.toSet === Set(0, 1, 4, 5))
   }
 
   /* * * * * * * * * * * Active nodes * * * * * * * * * * */
