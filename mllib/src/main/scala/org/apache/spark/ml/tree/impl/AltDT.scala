@@ -202,15 +202,9 @@ private[ml] object AltDT extends Logging {
 
         // Broadcast aggregated bit vectors.  On each partition, update instance--node map.
         val aggBitVectorsBc = input.sparkContext.broadcast(aggBitVectors)
-        val newPartitionInfos = partitionInfos.map { partitionInfo =>
+        partitionInfos = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVectorsBc.value, numNodeOffsets)
         }
-        // TODO: remove.  For some reason, this is needed to make things work.
-        // Probably messing up somewhere above...
-        newPartitionInfos.cache().count()
-        partitionInfos = newPartitionInfos
-
-        // TODO: unpersist aggBitVectorsBc after action.
       }
 
       currentLevel += 1
