@@ -205,7 +205,7 @@ private[spark] object DecisionTreeMetadata extends Logging {
     buildMetadata(input, strategy, numTrees = 1, featureSubsetStrategy = "all")
   }
 
-    /**
+  /**
    * Given the arity of a categorical feature (arity = number of categories),
    * return the number of bins for the feature if it is to be treated as an unordered feature.
    * There is 1 split for every partitioning of categories into 2 disjoint, non-empty sets;

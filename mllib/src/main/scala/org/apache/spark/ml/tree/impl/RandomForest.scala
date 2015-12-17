@@ -143,7 +143,7 @@ private[ml] object RandomForest extends Logging {
     rng.setSeed(seed)
 
     // Allocate and queue root nodes.
-    val topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(nodeIndex = 1))
+    val topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(id = 1))
     Range(0, numTrees).foreach(treeIndex => nodeQueue.enqueue((treeIndex, topNodes(treeIndex))))
 
     while (nodeQueue.nonEmpty) {
@@ -179,28 +179,32 @@ private[ml] object RandomForest extends Logging {
       }
     }
 
-    val numFeatures = metadata.numFeatures
+    topNodes.map { lNode =>
+      finalizeTree(lNode.toNode, strategy.algo, strategy.numClasses, metadata.numFeatures,
+        parentUID)
+    }
+  }
 
+  private[tree] def finalizeTree(
+      rootNode: Node,
+      algo: OldAlgo.Algo,
+      numClasses: Int,
+      numFeatures: Int,
+      parentUID: Option[String]): DecisionTreeModel = {
     parentUID match {
       case Some(uid) =>
-        if (strategy.algo == OldAlgo.Classification) {
-          topNodes.map { rootNode =>
-            new DecisionTreeClassificationModel(uid, rootNode.toNode, numFeatures,
-              strategy.getNumClasses)
-          }
+        if (algo == OldAlgo.Classification) {
+          new DecisionTreeClassificationModel(uid, rootNode, numFeatures = numFeatures,
+            numClasses = numClasses)
         } else {
-          topNodes.map { rootNode =>
-            new DecisionTreeRegressionModel(uid, rootNode.toNode, numFeatures)
-          }
+          new DecisionTreeRegressionModel(uid, rootNode, numFeatures = numFeatures)
         }
       case None =>
-        if (strategy.algo == OldAlgo.Classification) {
-          topNodes.map { rootNode =>
-            new DecisionTreeClassificationModel(rootNode.toNode, numFeatures,
-              strategy.getNumClasses)
-          }
+        if (algo == OldAlgo.Classification) {
+          new DecisionTreeClassificationModel(rootNode, numFeatures = numFeatures,
+            numClasses = numClasses)
         } else {
-          topNodes.map(rootNode => new DecisionTreeRegressionModel(rootNode.toNode, numFeatures))
+          new DecisionTreeRegressionModel(rootNode, numFeatures = numFeatures)
         }
     }
   }

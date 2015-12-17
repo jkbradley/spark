@@ -56,7 +56,8 @@ object DecisionTreeExample {
       input: String = null,
       testInput: String = "",
       dataFormat: String = "libsvm",
-      algo: String = "Classification",
+      labelType: String = "classification",
+      algorithm: String = "byRow",
       maxDepth: Int = 5,
       maxBins: Int = 32,
       minInstancesPerNode: Int = 1,
@@ -71,9 +72,13 @@ object DecisionTreeExample {
 
     val parser = new OptionParser[Params]("DecisionTreeExample") {
       head("DecisionTreeExample: an example decision tree app.")
-      opt[String]("algo")
-        .text(s"algorithm (classification, regression), default: ${defaultParams.algo}")
-        .action((x, c) => c.copy(algo = x))
+      opt[String]("labelType")
+        .text(s"type of label to predict (classification, regression), default:" +
+          s" ${defaultParams.labelType}")
+        .action((x, c) => c.copy(labelType = x))
+      opt[String]("algorithm")
+        .text(s"algorithm (byRow, byCol), default: ${defaultParams.algorithm}")
+        .action((x, c) => c.copy(algorithm = x))
       opt[Int]("maxDepth")
         .text(s"max depth of the tree, default: ${defaultParams.maxDepth}")
         .action((x, c) => c.copy(maxDepth = x))
@@ -157,7 +162,7 @@ object DecisionTreeExample {
    * @param input  Path to input dataset.
    * @param dataFormat  "libsvm" or "dense"
    * @param testInput  Path to test dataset.
-   * @param algo  Classification or Regression
+   * @param labelType  Classification or Regression
    * @param fracTest  Fraction of input data to hold out for testing.  Ignored if testInput given.
    * @return  (training dataset, test dataset)
    */
@@ -166,7 +171,7 @@ object DecisionTreeExample {
       input: String,
       dataFormat: String,
       testInput: String,
-      algo: String,
+      labelType: String,
       fracTest: Double): (DataFrame, DataFrame) = {
     val sqlContext = new SQLContext(sc)
 
@@ -202,19 +207,19 @@ object DecisionTreeExample {
     val conf = new SparkConf().setAppName(s"DecisionTreeExample with $params")
     val sc = new SparkContext(conf)
     params.checkpointDir.foreach(sc.setCheckpointDir)
-    val algo = params.algo.toLowerCase
+    val labelType = params.labelType.toLowerCase
 
     println(s"DecisionTreeExample with parameters:\n$params")
 
     // Load training and test data and cache it.
     val (training: DataFrame, test: DataFrame) =
-      loadDatasets(sc, params.input, params.dataFormat, params.testInput, algo, params.fracTest)
+      loadDatasets(sc, params.input, params.dataFormat, params.testInput, labelType, params.fracTest)
 
     // Set up Pipeline
     val stages = new mutable.ArrayBuffer[PipelineStage]()
     // (1) For classification, re-index classes.
-    val labelColName = if (algo == "classification") "indexedLabel" else "label"
-    if (algo == "classification") {
+    val labelColName = if (labelType == "classification") "indexedLabel" else "label"
+    if (labelType == "classification") {
       val labelIndexer = new StringIndexer()
         .setInputCol("label")
         .setOutputCol(labelColName)
@@ -228,7 +233,7 @@ object DecisionTreeExample {
       .setMaxCategories(10)
     stages += featuresIndexer
     // (3) Learn Decision Tree
-    val dt = algo match {
+    val dt = labelType match {
       case "classification" =>
         new DecisionTreeClassifier()
           .setFeaturesCol("indexedFeatures")
@@ -239,6 +244,7 @@ object DecisionTreeExample {
           .setMinInfoGain(params.minInfoGain)
           .setCacheNodeIds(params.cacheNodeIds)
           .setCheckpointInterval(params.checkpointInterval)
+          .setAlgorithm(params.algorithm)
       case "regression" =>
         new DecisionTreeRegressor()
           .setFeaturesCol("indexedFeatures")
@@ -249,6 +255,7 @@ object DecisionTreeExample {
           .setMinInfoGain(params.minInfoGain)
           .setCacheNodeIds(params.cacheNodeIds)
           .setCheckpointInterval(params.checkpointInterval)
+          .setAlgorithm(params.algorithm)
       case _ => throw new IllegalArgumentException("Algo ${params.algo} not supported.")
     }
     stages += dt
@@ -261,17 +268,17 @@ object DecisionTreeExample {
     println(s"Training time: $elapsedTime seconds")
 
     // Get the trained Decision Tree from the fitted PipelineModel
-    algo match {
+    labelType match {
       case "classification" =>
         val treeModel = pipelineModel.stages.last.asInstanceOf[DecisionTreeClassificationModel]
-        if (treeModel.numNodes < 20) {
+        if (treeModel.numNodes < 200) {
           println(treeModel.toDebugString) // Print full model.
         } else {
           println(treeModel) // Print model summary.
         }
       case "regression" =>
         val treeModel = pipelineModel.stages.last.asInstanceOf[DecisionTreeRegressionModel]
-        if (treeModel.numNodes < 20) {
+        if (treeModel.numNodes < 200) {
           println(treeModel.toDebugString) // Print full model.
         } else {
           println(treeModel) // Print model summary.
@@ -280,7 +287,7 @@ object DecisionTreeExample {
     }
 
     // Evaluate model on training, test data
-    algo match {
+    labelType match {
       case "classification" =>
         println("Training data results:")
         evaluateClassificationModel(pipelineModel, training, labelColName)

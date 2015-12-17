@@ -166,4 +166,8 @@ private[spark] class EntropyCalculator(stats: Array[Double]) extends ImpurityCal
 
   override def toString: String = s"EntropyCalculator(stats = [${stats.mkString(", ")}])"
 
+  private[spark] def exactlyEquals(other: ImpurityCalculator): Boolean = other match {
+    case o: EntropyCalculator => stats.sameElements(other.stats)
+    case _ => false
+  }
 }

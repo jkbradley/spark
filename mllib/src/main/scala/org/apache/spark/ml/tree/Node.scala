@@ -275,7 +275,6 @@ private[tree] class LearningNode(
         // Here we want to keep same behavior with the old mllib.DecisionTreeModel
         new LeafNode(stats.impurityCalculator.predict, -1.0, stats.impurityCalculator)
       }
-
     }
   }
 
@@ -289,8 +288,9 @@ private[tree] class LearningNode(
    * @return  Leaf index if the data point reaches a leaf.
    *          Otherwise, last node reachable in tree matching this example.
    *          Note: This is the global node index, i.e., the index used in the tree.
-   *                This index is different from the index used during training a particular
-   *                group of nodes on one call to [[findBestSplits()]].
+   *          This index is different from the index used during training a particular
+   *          group of nodes on one call to
+   *          [[org.apache.spark.ml.tree.impl.RandomForest.findBestSplits()]].
    */
   def predictImpl(binnedFeatures: Array[Int], splits: Array[Array[Split]]): Int = {
     if (this.isLeaf || this.split.isEmpty) {
@@ -315,7 +315,6 @@ private[tree] class LearningNode(
       }
     }
   }
-
 }
 
 private[tree] object LearningNode {
@@ -325,12 +324,12 @@ private[tree] object LearningNode {
       id: Int,
       isLeaf: Boolean,
       stats: ImpurityStats): LearningNode = {
-    new LearningNode(id, None, None, None, false, stats)
+    new LearningNode(id, None, None, None, isLeaf, stats)
   }
 
   /** Create an empty node with the given node index.  Values must be set later on. */
-  def emptyNode(nodeIndex: Int): LearningNode = {
-    new LearningNode(nodeIndex, None, None, None, false, null)
+  def emptyNode(id: Int): LearningNode = {
+    new LearningNode(id, None, None, None, false, null)
   }
 
   // The below indexing methods were copied from spark.mllib.tree.model.Node

@@ -18,6 +18,7 @@
 package org.apache.spark.mllib.tree.impurity
 
 import org.apache.spark.annotation.{DeveloperApi, Experimental, Since}
+import org.apache.spark.mllib.tree.model.Predict
 
 /**
  * :: Experimental ::
@@ -158,6 +159,12 @@ private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) exten
    */
   def prob(label: Double): Double = -1
 
+  /** Get [[Predict]] struct. */
+  def getPredict: Predict = {
+    val pred = this.predict
+    new Predict(predict = pred, prob = this.prob(pred))
+  }
+
   /**
    * Return the index of the largest array element.
    * Fails if the array is empty.
@@ -178,4 +185,6 @@ private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) exten
     result._1
   }
 
+  /** Test exact equality */
+  private[spark] def exactlyEquals(other: ImpurityCalculator): Boolean
 }

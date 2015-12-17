@@ -88,6 +88,7 @@ private[spark] object InformationGainStats {
  * @param rightImpurityCalculator impurity statistics for right child node
  * @param valid whether the current split satisfies minimum info gain or
  *              minimum number of instances per node
+ *              TODO: Can we remove this?  Not sure if this is used anywhere...
  */
 @DeveloperApi
 private[spark] class ImpurityStats(
@@ -103,20 +104,39 @@ private[spark] class ImpurityStats(
       s"right impurity = $rightImpurity"
   }
 
-  def leftImpurity: Double = if (leftImpurityCalculator != null) {
+  lazy val leftImpurity: Double = if (leftImpurityCalculator != null) {
     leftImpurityCalculator.calculate()
   } else {
     -1.0
   }
 
-  def rightImpurity: Double = if (rightImpurityCalculator != null) {
+  lazy val rightImpurity: Double = if (rightImpurityCalculator != null) {
     rightImpurityCalculator.calculate()
   } else {
     -1.0
   }
+
+  /** Test exact equality */
+  private[spark] def exactlyEquals(other: ImpurityStats): Boolean = {
+    gain == other.gain && impurity == other.impurity &&
+      impurityCalculator.exactlyEquals(other.impurityCalculator) &&
+      leftImpurityCalculator.exactlyEquals(other.leftImpurityCalculator) &&
+      rightImpurityCalculator.exactlyEquals(other.rightImpurityCalculator) &&
+      valid == other.valid
+  }
 }
 
 private[spark] object ImpurityStats {
+
+  /**
+   * Create stats object missing the child node info.
+   */
+  def apply(
+      impurity: Double,
+      impurityCalculator: ImpurityCalculator,
+      valid: Boolean = true): ImpurityStats = {
+    new ImpurityStats(Double.NaN, impurity, impurityCalculator, null, null, valid)
+  }
 
   /**
    * Return an [[org.apache.spark.mllib.tree.model.ImpurityStats]] object to
