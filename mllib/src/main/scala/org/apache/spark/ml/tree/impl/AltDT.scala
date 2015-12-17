@@ -171,8 +171,8 @@ private[ml] object AltDT extends Logging {
     var doneLearning = false
     while (currentLevel < strategy.maxDepth && !doneLearning) {
       // Compute best split for each active node.
-      val bestSplitsAndGains: Array[(Option[Split], ImpurityStats)] =
-        computeBestSplits(partitionInfos, labelsBc, metadata)
+      val bestSplitsAndGains: Array[(Option[Split], ImpurityStats, RoaringBitmap)] =
+        computeBestSplits(partitionInfos, labelsBc, metadata, numRows)
       /*
       // NOTE: The actual active nodes (activeNodePeriphery) may be a subset of the nodes under
       //       bestSplitsAndGains since
@@ -197,10 +197,11 @@ private[ml] object AltDT extends Logging {
       doneLearning = currentLevel + 1 >= strategy.maxDepth || estimatedRemainingActive == 0
 
       if (!doneLearning) {
-        val splits: Array[Option[Split]] = bestSplitsAndGains.map(_._1)
-
         // Aggregate bit vector (1 bit/instance) indicating whether each instance goes left/right
-        val aggBitVector: RoaringBitmap = aggregateBitVector(partitionInfos, splits, numRows)
+        val aggBitVector = bestSplitsAndGains.map(_._3).reduce[RoaringBitmap] { (acc, bitv) =>
+          acc.or(bitv)
+          acc
+        }
         val newPartitionInfos = partitionInfos.map { partitionInfo =>
           partitionInfo.update(aggBitVector, numNodeOffsets)
         }
@@ -242,7 +243,8 @@ private[ml] object AltDT extends Logging {
   private[impl] def computeBestSplits(
       partitionInfos: RDD[PartitionInfo],
       labelsBc: Broadcast[Array[Double]],
-      metadata: AltDTMetadata): Array[(Option[Split], ImpurityStats)] = {
+      metadata: AltDTMetadata,
+      numRows: Int): Array[(Option[Split], ImpurityStats, RoaringBitmap)] = {
     // On each partition, for each feature on the partition, select the best split for each node.
     // This will use:
     //  - groupedColStore (the features)
@@ -251,23 +253,33 @@ private[ml] object AltDT extends Logging {
     // Each worker returns:
     //   for each active node, best split + info gain,
     //     where the best split is None if no useful split exists
-    val partBestSplitsAndGains: RDD[Array[(Option[Split], ImpurityStats)]] = partitionInfos.map {
+    val partBestSplitsAndGains: RDD[Array[(Option[Split], ImpurityStats, RoaringBitmap)]] = partitionInfos.map {
       case PartitionInfo(columns: Array[FeatureVector], nodeOffsets: Array[Int],
           activeNodes: BitSet) =>
         val localLabels = labelsBc.value
         // Iterate over the active nodes in the current level.
-        val toReturn = new Array[(Option[Split], ImpurityStats)](activeNodes.cardinality())
+        val toReturn = new Array[(Option[Split], ImpurityStats, RoaringBitmap)](activeNodes.cardinality())
         val iter: Iterator[Int] = activeNodes.iterator
         var i = 0
         while (iter.hasNext) {
           val nodeIndexInLevel = iter.next
           val fromOffset = nodeOffsets(nodeIndexInLevel)
           val toOffset = nodeOffsets(nodeIndexInLevel + 1)
+          val localFeatureIndex: Map[Int, Int] = columns.map(_.featureIndex).zipWithIndex.toMap
           val splitsAndStats =
             columns.map { col =>
               chooseSplit(col, localLabels, fromOffset, toOffset, metadata)
             }
-          toReturn(i) = splitsAndStats.maxBy(_._2.gain)
+          val (bestSplit, bestStats) = splitsAndStats.maxBy(_._2.gain)
+          val bitv: RoaringBitmap = bestSplit match {
+            case Some(split: Split) =>
+              val col = columns(localFeatureIndex(split.featureIndex))
+              bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
+            case None =>
+              new RoaringBitmap()
+          }
+
+          toReturn(i) = (bestSplit, bestStats, bitv)
           i += 1
         }
         toReturn
@@ -275,11 +287,11 @@ private[ml] object AltDT extends Logging {
 
     // Aggregate best split for each active node.
     partBestSplitsAndGains.treeReduce { case (splitsGains1, splitsGains2) =>
-      splitsGains1.zip(splitsGains2).map { case ((split1, gain1), (split2, gain2)) =>
+      splitsGains1.zip(splitsGains2).map { case ((split1, gain1, bitv1), (split2, gain2, bitv2)) =>
         if (gain1.gain >= gain2.gain) {
-          (split1, gain1)
+          (split1, gain1, bitv1)
         } else {
-          (split2, gain2)
+          (split2, gain2, bitv2)
         }
       }
     }
@@ -297,10 +309,10 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def computeActiveNodePeriphery(
       oldPeriphery: Array[LearningNode],
-      bestSplitsAndGains: Array[(Option[Split], ImpurityStats)],
+      bestSplitsAndGains: Array[(Option[Split], ImpurityStats, RoaringBitmap)],
       minInfoGain: Double): Array[LearningNode] = {
     bestSplitsAndGains.zipWithIndex.flatMap {
-      case ((split, stats), nodeIdx) =>
+      case ((split, stats, bitv), nodeIdx) =>
         val node = oldPeriphery(nodeIdx)
         if (split.nonEmpty && stats.gain > minInfoGain) {
           // TODO: remove node id
