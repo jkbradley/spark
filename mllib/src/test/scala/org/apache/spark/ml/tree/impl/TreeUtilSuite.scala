@@ -32,7 +32,7 @@ class TreeUtilSuite extends SparkFunSuite with MLlibTestSparkContext  {
   private def checkDense(rows: Seq[Vector]): Unit = {
     val numRowPartitions = 2
     val rowStore = sc.parallelize(rows, numRowPartitions)
-    val colStore = rowToColumnStoreDense(rowStore)
+    val colStore = rowToColumnStoreDense(rowStore, rowStore.count.toInt)
     val numColPartitions = colStore.partitions.length
     val cols: Map[Int, Vector] = colStore.collect().toMap
     val numRows = rows.size

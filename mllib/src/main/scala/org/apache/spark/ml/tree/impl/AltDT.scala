@@ -123,16 +123,18 @@ private[ml] object AltDT extends Logging {
         impurityCalculator)
     }
 
+    val numRows = {
+      val longNumRows: Long = input.count()
+      require(longNumRows < Int.MaxValue, s"rowToColumnStore given RDD with $longNumRows rows," +
+        s" but can handle at most ${Int.MaxValue} rows")
+      longNumRows.toInt
+    }
     // Prepare column store.
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
     // TODO: Is this mapping from arrays to iterators to arrays (when constructing learningData)?
     //       Or is the mapping implicit (i.e., not costly)?
-    val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features))
-    val numRows: Int = colStoreInit.first()._2.size
-    val labels = new Array[Double](numRows)
-    input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
-      labels(rowIndex.toInt) = label
-    }
+    val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features), numRows)
+    val labels = input.map(_.label).collect()
     val labelsBc = input.sparkContext.broadcast(labels)
     // NOTE: Labels are not sorted with features since that would require 1 copy per feature,
     //       rather than 1 copy per worker.  This means a lot of random accesses.
