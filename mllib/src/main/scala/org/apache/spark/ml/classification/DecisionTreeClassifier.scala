@@ -98,7 +98,12 @@ final class DecisionTreeClassifier @Since("1.4.0") (
   override protected def train(dataset: DataFrame): DecisionTreeClassificationModel =
     train(dataset, None)
 
-  def train(
+  def fit(
+      dataset: DataFrame,
+      transposedDataset: RDD[(Int, Vector)]): DecisionTreeClassificationModel =
+    train(dataset, Some(transposedDataset))
+
+  private def train(
       dataset: DataFrame,
       transposedDataset: Option[RDD[(Int, Vector)]]): DecisionTreeClassificationModel = {
     val categoricalFeatures: Map[Int, Int] =

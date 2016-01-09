@@ -102,12 +102,15 @@ private[ml] object AltDT extends Logging {
     // TODO: Check validity of params
     // TODO: Check for empty dataset
     val numFeatures = input.first().features.size
-    val rootNode = trainImpl(input, strategy)
+    val rootNode = trainImpl(input, strategy, colStoreInput)
     impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, numFeatures,
       parentUID)
   }
 
-  private[impl] def trainImpl(input: RDD[LabeledPoint], strategy: Strategy): Node = {
+  private[impl] def trainImpl(
+      input: RDD[LabeledPoint],
+      strategy: Strategy,
+      colStoreInput: Option[RDD[(Int, Vector)]]): Node = {
     val metadata = AltDTMetadata.fromStrategy(strategy)
 
     // The case with 1 node (depth = 0) is handled separately.

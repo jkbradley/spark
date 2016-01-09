@@ -94,7 +94,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
   test("example providing transposed dataset") {
     val data = Range(0, 8).map(x => LabeledPoint(x, Vectors.dense(x)))
-    val transposedDataset = TreeUtil.rowToColumnStoreDense(data.map(_.features))
+    val transposedDataset = TreeUtil.rowToColumnStoreDense(sc.parallelize(data.map(_.features)))
     val df = sqlContext.createDataFrame(data)
     val dt = new DecisionTreeRegressor()
       .setFeaturesCol("features")
