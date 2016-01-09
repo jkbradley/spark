@@ -97,6 +97,7 @@ private[ml] object AltDT extends Logging {
   def train(
       input: RDD[LabeledPoint],
       strategy: Strategy,
+      colStoreInput: Option[RDD[(Int, Vector)]] = None,
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
     // TODO: Check for empty dataset
@@ -127,7 +128,8 @@ private[ml] object AltDT extends Logging {
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
     // TODO: Is this mapping from arrays to iterators to arrays (when constructing learningData)?
     //       Or is the mapping implicit (i.e., not costly)?
-    val colStoreInit: RDD[(Int, Vector)] = rowToColumnStoreDense(input.map(_.features))
+    val colStoreInit: RDD[(Int, Vector)] = colStoreInput.getOrElse(
+      rowToColumnStoreDense(input.map(_.features)))
     val numRows: Int = colStoreInit.first()._2.size
     val labels = new Array[Double](numRows)
     input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>

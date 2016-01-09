@@ -92,7 +92,12 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
   /** @group getParam */
   def getAlgorithm: String = $(algorithm)
 
-  override protected def train(dataset: DataFrame): DecisionTreeRegressionModel = {
+  override protected def train(dataset: DataFrame): DecisionTreeRegressionModel =
+    train(dataset, None)
+
+  protected def train(
+      dataset: DataFrame,
+      transposedDataset: Option[RDD[(Int, Vector)]]): DecisionTreeRegressionModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
@@ -103,10 +108,11 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
           featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
         trees.head
       case "byCol" =>
-        AltDT.train(oldDataset, strategy, parentUID = Some(uid))
+        AltDT.train(oldDataset, strategy, colStoreInput = transposedDataset, parentUID = Some(uid))
     }
     model.asInstanceOf[DecisionTreeRegressionModel]
   }
+
 
   /** (private[ml]) Create a Strategy instance to use with the old API. */
   private[ml] def getOldStrategy(categoricalFeatures: Map[Int, Int]): OldStrategy = {
