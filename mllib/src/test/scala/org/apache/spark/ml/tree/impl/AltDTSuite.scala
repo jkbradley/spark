@@ -355,11 +355,11 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val col = new FeatureVector(0, 0, Array(0.1, 0.2, 0.4, 0.6, 0.7),
       Array(4, 2, 0, 1, 3))
     def checkSplit(fromOffset: Int, toOffset: Int, threshold: Double,
-    expectedRight: Set[Int]): Unit = {
-      val split = new ContinuousSplit(0, threshold)
-      val numRows = col.values.length
-      val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
-      assert(bitv.toArray.toSet === expectedRight)
+      expectedRight: Set[Int]): Unit = {
+        val split = new ContinuousSplit(0, threshold)
+        val numRows = col.values.length
+        val bitv = AltDT.bitVectorFromSplit(col, fromOffset, toOffset, split, numRows)
+        assert(bitv.toArray.toSet === expectedRight)
     }
     // Left child node
     checkSplit(0, 3, 0.05, Set(0, 2, 4))
