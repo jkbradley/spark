@@ -40,7 +40,6 @@ import org.apache.spark.mllib.linalg._
 import org.apache.spark.mllib.linalg.distributed._
 import org.apache.spark.mllib.optimization._
 import org.apache.spark.mllib.random.{RandomRDDs => RG}
-import org.apache.spark.mllib.recommendation._
 import org.apache.spark.mllib.regression._
 import org.apache.spark.mllib.stat.{
   KernelDensity, MultivariateStatisticalSummary, Statistics}
@@ -444,65 +443,6 @@ private[python] class PythonMLLibAPI extends Serializable {
 
     val model = pic.run(data.rdd.map(v => (v(0).toLong, v(1).toLong, v(2))))
     new PowerIterationClusteringModelWrapper(model)
-  }
-
-  /**
-   * Java stub for Python mllib ALS.train().  This stub returns a handle
-   * to the Java object instead of the content of the Java object.  Extra care
-   * needs to be taken in the Python code to ensure it gets freed on exit; see
-   * the Py4J documentation.
-   */
-  def trainALSModel(
-      ratingsJRDD: JavaRDD[Rating],
-      rank: Int,
-      iterations: Int,
-      lambda: Double,
-      blocks: Int,
-      nonnegative: Boolean,
-      seed: java.lang.Long): MatrixFactorizationModel = {
-
-    val als = new ALS()
-      .setRank(rank)
-      .setIterations(iterations)
-      .setLambda(lambda)
-      .setBlocks(blocks)
-      .setNonnegative(nonnegative)
-
-    if (seed != null) als.setSeed(seed)
-
-    val model = als.run(ratingsJRDD.rdd)
-    new MatrixFactorizationModelWrapper(model)
-  }
-
-  /**
-   * Java stub for Python mllib ALS.trainImplicit().  This stub returns a
-   * handle to the Java object instead of the content of the Java object.
-   * Extra care needs to be taken in the Python code to ensure it gets freed on
-   * exit; see the Py4J documentation.
-   */
-  def trainImplicitALSModel(
-      ratingsJRDD: JavaRDD[Rating],
-      rank: Int,
-      iterations: Int,
-      lambda: Double,
-      blocks: Int,
-      alpha: Double,
-      nonnegative: Boolean,
-      seed: java.lang.Long): MatrixFactorizationModel = {
-
-    val als = new ALS()
-      .setImplicitPrefs(true)
-      .setRank(rank)
-      .setIterations(iterations)
-      .setLambda(lambda)
-      .setBlocks(blocks)
-      .setAlpha(alpha)
-      .setNonnegative(nonnegative)
-
-    if (seed != null) als.setSeed(seed)
-
-    val model = als.run(ratingsJRDD.rdd)
-    new MatrixFactorizationModelWrapper(model)
   }
 
   /**
@@ -1425,33 +1365,6 @@ private[spark] object SerDe extends Serializable {
     }
   }
 
-  // Pickler for Rating
-  private[python] class RatingPickler extends BasePickler[Rating] {
-
-    def saveState(obj: Object, out: OutputStream, pickler: Pickler): Unit = {
-      val rating: Rating = obj.asInstanceOf[Rating]
-      saveObjects(out, pickler, rating.user, rating.product, rating.rating)
-    }
-
-    def construct(args: Array[Object]): Object = {
-      if (args.length != 3) {
-        throw new PickleException("should be 3")
-      }
-      new Rating(ratingsIdCheckLong(args(0)), ratingsIdCheckLong(args(1)),
-        args(2).asInstanceOf[Double])
-    }
-
-    private def ratingsIdCheckLong(obj: Object): Int = {
-      try {
-        obj.asInstanceOf[Int]
-      } catch {
-        case ex: ClassCastException =>
-          throw new PickleException(s"Ratings id ${obj.toString} exceeds " +
-            s"max integer value of ${Int.MaxValue}", ex)
-      }
-    }
-  }
-
   var initialized = false
   // This should be called before trying to serialize any above classes
   // In cluster mode, this should be put in the closure
@@ -1464,7 +1377,6 @@ private[spark] object SerDe extends Serializable {
         new SparseMatrixPickler().register()
         new SparseVectorPickler().register()
         new LabeledPointPickler().register()
-        new RatingPickler().register()
         initialized = true
       }
     }

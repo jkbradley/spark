@@ -25,9 +25,7 @@ import org.json4s.jackson.JsonMethods._
 import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml._
-import org.apache.spark.ml.classification.OneVsRestParams
 import org.apache.spark.ml.evaluation.Evaluator
-import org.apache.spark.ml.feature.RFormulaModel
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared.HasSeed
 import org.apache.spark.ml.util._
@@ -216,14 +214,6 @@ object CrossValidator extends MLReadable[CrossValidator] {
         case p: Pipeline => p.getStages.asInstanceOf[Array[Params]]
         case pm: PipelineModel => pm.stages.asInstanceOf[Array[Params]]
         case v: ValidatorParams => Array(v.getEstimator, v.getEvaluator)
-        case ovr: OneVsRestParams =>
-          // TODO: SPARK-11892: This case may require special handling.
-          throw new UnsupportedOperationException("CrossValidator write will fail because it" +
-            " cannot yet handle an estimator containing type: ${ovr.getClass.getName}")
-        case rform: RFormulaModel =>
-          // TODO: SPARK-11891: This case may require special handling.
-          throw new UnsupportedOperationException("CrossValidator write will fail because it" +
-            " cannot yet handle an estimator containing an RFormulaModel")
         case _: Params => Array()
       }
       val subStageMaps = subStages.map(getUidMapImpl).foldLeft(List.empty[(String, Params)])(_ ++ _)

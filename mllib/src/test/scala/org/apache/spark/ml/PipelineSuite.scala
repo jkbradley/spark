@@ -26,7 +26,7 @@ import org.scalatest.mock.MockitoSugar.mock
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.Pipeline.SharedReadWrite
-import org.apache.spark.ml.feature.{HashingTF, MinMaxScaler}
+import org.apache.spark.ml.feature.HashingTF
 import org.apache.spark.ml.param.{IntParam, ParamMap}
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.linalg.Vectors
@@ -173,26 +173,6 @@ class PipelineSuite extends SparkFunSuite with MLlibTestSparkContext with Defaul
       intercept[UnsupportedOperationException] {
         unWritablePipeline.write
       }
-    }
-  }
-
-  test("pipeline validateParams") {
-    val df = sqlContext.createDataFrame(
-      Seq(
-        (1, Vectors.dense(0.0, 1.0, 4.0), 1.0),
-        (2, Vectors.dense(1.0, 0.0, 4.0), 2.0),
-        (3, Vectors.dense(1.0, 0.0, 5.0), 3.0),
-        (4, Vectors.dense(0.0, 0.0, 5.0), 4.0))
-    ).toDF("id", "features", "label")
-
-    intercept[IllegalArgumentException] {
-       val scaler = new MinMaxScaler()
-         .setInputCol("features")
-         .setOutputCol("features_scaled")
-         .setMin(10)
-         .setMax(0)
-       val pipeline = new Pipeline().setStages(Array(scaler))
-       pipeline.fit(df)
     }
   }
 }
