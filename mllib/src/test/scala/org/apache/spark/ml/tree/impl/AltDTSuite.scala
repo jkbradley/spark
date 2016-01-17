@@ -21,6 +21,7 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.regression.DecisionTreeRegressor
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.AltDT.{AltDTMetadata, FeatureVector, PartitionInfo}
+import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.impurity._
@@ -90,6 +91,25 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val model = dt.fit(df)
     assert(model.depth === 2)
     assert(model.numNodes === 5)
+  }
+
+  test("example providing transposed dataset") {
+    val data = Range(0, 8).map(x => LabeledPoint(x, Vectors.dense(x)))
+    val transposedDataset = TreeUtil.rowToColumnStoreDense(sc.parallelize(data.map(_.features)))
+    val df = sqlContext.createDataFrame(data)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features")
+      .setLabelCol("label")
+      .setMaxDepth(10)
+      .setAlgorithm("byCol")
+    val model = dt.fit(df, transposedDataset)
+    assert(model.rootNode.isInstanceOf[InternalNode])
+    val root = model.rootNode.asInstanceOf[InternalNode]
+    assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[InternalNode])
+    val left = root.leftChild.asInstanceOf[InternalNode]
+    val right = root.rightChild.asInstanceOf[InternalNode]
+    val grandkids = Array(left.leftChild, left.rightChild, right.leftChild, right.rightChild)
+    assert(grandkids.forall(_.isInstanceOf[InternalNode]))
   }
 
   /* * * * * * * * * * * Helper classes * * * * * * * * * * */
