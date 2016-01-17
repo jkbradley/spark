@@ -19,11 +19,13 @@ package org.apache.spark.ml.tree.impl
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.mllib.linalg.{DenseVector, SparseVector, Vector, Vectors}
 import org.apache.spark.rdd.RDD
 
 
-private[tree] object TreeUtil {
+@DeveloperApi
+object TreeUtil {
 
   /**
    * Convert a dataset of [[Vector]] from row storage to column storage.
