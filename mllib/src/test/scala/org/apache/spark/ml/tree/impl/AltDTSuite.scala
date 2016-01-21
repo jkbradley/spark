@@ -21,7 +21,6 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.regression.DecisionTreeRegressor
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.AltDT.{AltDTMetadata, FeatureVector, PartitionInfo}
-import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.impurity._
@@ -29,6 +28,8 @@ import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.util.collection.BitSet
 import org.roaringbitmap.RoaringBitmap
+
+import scala.util.Random
 
 /**
  * Test suite for [[AltDT]].
@@ -124,6 +125,22 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val original = Vectors.dense(0.7, 0.1, 0.3)
     val v2 = FeatureVector.fromOriginal(1, 0, original)
     assert(v === v2)
+  }
+
+  test("FeatureVectorSortByValue") {
+    val values = Array(0.1, 0.2, 0.4, 0.6, 0.7, 0.9, 1.5, 1.55)
+    val col = Random.shuffle(values.toIterator).toArray
+    val (_, unsortedIndices) = col.zipWithIndex.unzip
+    val sortedIndices = unsortedIndices.sortBy(x => col(x)).toArray
+    val fvUnsorted = Vectors.dense(col)
+    val featureIndex = 3
+    val featureArity = 5
+    val fvSorted =
+      FeatureVector.fromOriginal(featureIndex, featureArity, fvUnsorted)
+    assert(fvSorted.featureIndex == featureIndex)
+    assert(fvSorted.featureArity == featureArity)
+    assert(fvSorted.values.deep == values.deep)
+    assert(fvSorted.indices.deep == sortedIndices.deep)
   }
 
   test("PartitionInfo") {
