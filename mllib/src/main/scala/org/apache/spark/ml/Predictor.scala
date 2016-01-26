@@ -31,13 +31,10 @@ import org.apache.spark.sql.types.{DataTypes, DoubleType, StructType}
 /**
  * (private[ml])  Trait for parameters for prediction (regression and classification).
  */
-private[ml] trait PredictorParams extends PipelineStage
+private[ml] trait PredictorParams extends Params
   with HasLabelCol with HasFeaturesCol with HasPredictionCol {
 
   // TODO: Support casting Array[Double] and Array[Float] to Vector when FeaturesType = Vector
-  setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
-  setUseForFitOnly(labelCol)
-  setInputColDataType(featuresCol, Seq(new VectorUDT))
 }
 
 /**
@@ -54,6 +51,10 @@ abstract class Predictor[
     Learner <: Predictor[Learner, M],
     M <: PredictionModel[M]]
   extends Estimator[M] with PredictorParams {
+
+  setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
+  setUseForFitOnly(labelCol)
+  setInputColDataType(featuresCol, Seq(new VectorUDT))
 
   /** @group setParam */
   def setLabelCol(value: String): Learner = set(labelCol, value).asInstanceOf[Learner]
@@ -94,6 +95,10 @@ abstract class Predictor[
 @DeveloperApi
 abstract class PredictionModel[M <: PredictionModel[M]]
   extends Model[M] with PredictorParams {
+
+  setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
+  setUseForFitOnly(labelCol)
+  setInputColDataType(featuresCol, Seq(new VectorUDT))
 
   /** @group setParam */
   def setFeaturesCol(value: String): M = set(featuresCol, value).asInstanceOf[M]

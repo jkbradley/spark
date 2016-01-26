@@ -91,6 +91,7 @@ public class JavaDeveloperApiExample {
       throw new Exception("MyJavaLogisticRegression predicted something other than 0," +
           " even though all coefficients are 0!");
     }
+    results.show();
 
     jsc.stop();
   }
@@ -104,7 +105,7 @@ public class JavaDeveloperApiExample {
  *       However, this should still compile and run successfully.
  */
 class MyJavaLogisticRegression
-  extends Classifier<Vector, MyJavaLogisticRegression, MyJavaLogisticRegressionModel> {
+  extends Classifier<MyJavaLogisticRegression, MyJavaLogisticRegressionModel> {
 
   public MyJavaLogisticRegression() {
     init();
@@ -145,7 +146,7 @@ class MyJavaLogisticRegression
 
   // This method is used by fit().
   // In Java, we have to make it public since Java does not understand Scala's protected modifier.
-  public MyJavaLogisticRegressionModel train(DataFrame dataset) {
+  public MyJavaLogisticRegressionModel fitImpl(DataFrame dataset) {
     // Extract columns from data using helper method.
     JavaRDD<LabeledPoint> oldDataset = extractLabeledPoints(dataset).toJavaRDD();
 
@@ -171,7 +172,7 @@ class MyJavaLogisticRegression
  *       However, this should still compile and run successfully.
  */
 class MyJavaLogisticRegressionModel
-  extends ClassificationModel<Vector, MyJavaLogisticRegressionModel> {
+  extends ClassificationModel<MyJavaLogisticRegressionModel> {
 
   private Vector coefficients_;
   public Vector coefficients() { return coefficients_; }

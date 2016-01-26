@@ -39,7 +39,7 @@ import org.apache.spark.sql.types.{AbstractDataType, StructType}
  * A stage in a pipeline, either an [[Estimator]] or a [[Transformer]].
  */
 @DeveloperApi
-trait PipelineStage extends Params with Logging {
+abstract class PipelineStage extends Params with Logging {
 
   private val inputColDataTypes: mutable.Map[Param[_], Seq[AbstractDataType]] =
     mutable.Map.empty[Param[_], Seq[AbstractDataType]]
