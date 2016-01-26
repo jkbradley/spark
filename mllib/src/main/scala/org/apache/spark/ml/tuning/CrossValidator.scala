@@ -88,10 +88,8 @@ class CrossValidator @Since("1.2.0") (@Since("1.4.0") override val uid: String)
   @Since("2.0.0")
   def setSeed(value: Long): this.type = set(seed, value)
 
-  @Since("1.4.0")
-  override def fit(dataset: DataFrame): CrossValidatorModel = {
+  override protected def fitImpl(dataset: DataFrame): CrossValidatorModel = {
     val schema = dataset.schema
-    transformSchema(schema, logging = true)
     val sqlCtx = dataset.sqlContext
     val est = $(estimator)
     val eval = $(evaluator)
@@ -124,13 +122,11 @@ class CrossValidator @Since("1.2.0") (@Since("1.4.0") override val uid: String)
     logInfo(s"Best set of parameters:\n${epm(bestIndex)}")
     logInfo(s"Best cross-validation metric: $bestMetric.")
     val bestModel = est.fit(dataset, epm(bestIndex)).asInstanceOf[Model[_]]
-    copyValues(new CrossValidatorModel(uid, bestModel, metrics).setParent(this))
+    new CrossValidatorModel(uid, bestModel, metrics)
   }
 
-  @Since("1.4.0")
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    $(estimator).transformSchema(schema)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    $(estimator).transformSchema(schema, fitting = true)
   }
 
   @Since("1.4.0")
@@ -325,19 +321,17 @@ class CrossValidatorModel private[ml] (
 
   @Since("1.4.0")
   override def validateParams(): Unit = {
+    super.validateParams()
     bestModel.validateParams()
   }
 
-  @Since("1.4.0")
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     bestModel.transform(dataset)
   }
 
   @Since("1.4.0")
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    bestModel.transformSchema(schema)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    bestModel.transformSchema(schema, fitting = false)
   }
 
   @Since("1.4.0")

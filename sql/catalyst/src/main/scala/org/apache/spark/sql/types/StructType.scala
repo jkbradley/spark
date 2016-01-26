@@ -334,9 +334,9 @@ case class StructType(fields: Array[StructField]) extends DataType with Seq[Stru
 
 object StructType extends AbstractDataType {
 
-  override private[sql] def defaultConcreteType: DataType = new StructType
+  override def defaultConcreteType: DataType = new StructType
 
-  override private[sql] def acceptsType(other: DataType): Boolean = {
+  override def acceptsType(other: DataType): Boolean = {
     other.isInstanceOf[StructType]
   }
 

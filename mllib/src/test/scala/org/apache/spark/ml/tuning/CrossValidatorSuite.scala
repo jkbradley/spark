@@ -282,11 +282,11 @@ object CrossValidatorSuite extends SparkFunSuite {
 
     override def validateParams(): Unit = require($(inputCol).nonEmpty)
 
-    override def fit(dataset: DataFrame): MyModel = {
+    override protected def fitImpl(dataset: DataFrame): MyModel = {
       throw new UnsupportedOperationException
     }
 
-    override def transformSchema(schema: StructType): StructType = {
+    override protected def transformSchemaImpl(schema: StructType): StructType = {
       throw new UnsupportedOperationException
     }
 

@@ -129,9 +129,9 @@ object DecimalType extends AbstractDataType {
     DecimalType(min(precision, MAX_PRECISION), min(scale, MAX_SCALE))
   }
 
-  override private[sql] def defaultConcreteType: DataType = SYSTEM_DEFAULT
+  override def defaultConcreteType: DataType = SYSTEM_DEFAULT
 
-  override private[sql] def acceptsType(other: DataType): Boolean = {
+  override def acceptsType(other: DataType): Boolean = {
     other.isInstanceOf[DecimalType]
   }
 

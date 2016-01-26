@@ -21,7 +21,7 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkException
 import org.apache.spark.annotation.{Experimental, Since}
-import org.apache.spark.ml.{Estimator, Model, Transformer}
+import org.apache.spark.ml.{PipelineStage, Estimator, Model, Transformer}
 import org.apache.spark.ml.attribute.{Attribute, NominalAttribute}
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
@@ -34,25 +34,11 @@ import org.apache.spark.util.collection.OpenHashMap
 /**
  * Base trait for [[StringIndexer]] and [[StringIndexerModel]].
  */
-private[feature] trait StringIndexerBase extends Params with HasInputCol with HasOutputCol
-    with HasHandleInvalid {
+private[feature] trait StringIndexerBase
+  extends PipelineStage with HasInputCol with HasOutputCol with HasHandleInvalid {
 
-  /** Validates and transforms the input schema. */
-  protected def validateAndTransformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputColName = $(inputCol)
-    val inputDataType = schema(inputColName).dataType
-    require(inputDataType == StringType || inputDataType.isInstanceOf[NumericType],
-      s"The input column $inputColName must be either string type or numeric type, " +
-        s"but got $inputDataType.")
-    val inputFields = schema.fields
-    val outputColName = $(outputCol)
-    require(inputFields.forall(_.name != outputColName),
-      s"Output column $outputColName already exists.")
-    val attr = NominalAttribute.defaultAttr.withName($(outputCol))
-    val outputFields = inputFields :+ attr.toStructField()
-    StructType(outputFields)
-  }
+  setInputColDataType(inputCol, Seq(DataTypes.StringType, DataTypes.NumericType))
+  setUseForFitOnly(inputCol)
 }
 
 /**
@@ -81,16 +67,17 @@ class StringIndexer(override val uid: String) extends Estimator[StringIndexerMod
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
 
-  override def fit(dataset: DataFrame): StringIndexerModel = {
+  override protected def fitImpl(dataset: DataFrame): StringIndexerModel = {
     val counts = dataset.select(col($(inputCol)).cast(StringType))
       .map(_.getString(0))
       .countByValue()
     val labels = counts.toSeq.sortBy(-_._2).map(_._1).toArray
-    copyValues(new StringIndexerModel(uid, labels).setParent(this))
+    new StringIndexerModel(uid, labels)
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateAndTransformSchema(schema)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    val attr = NominalAttribute.defaultAttr.withName($(outputCol))
+    SchemaUtils.appendColumn(schema, attr.toStructField())
   }
 
   override def copy(extra: ParamMap): StringIndexer = defaultCopy(extra)
@@ -144,7 +131,8 @@ class StringIndexerModel (
   /** @group setParam */
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
-  override def transform(dataset: DataFrame): DataFrame = {
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
+    // TODO: Remove this hack.
     if (!dataset.schema.fieldNames.contains($(inputCol))) {
       logInfo(s"Input column ${$(inputCol)} does not exist during transformation. " +
         "Skip StringIndexerModel.")
@@ -162,24 +150,25 @@ class StringIndexerModel (
     val metadata = NominalAttribute.defaultAttr
       .withName($(inputCol)).withValues(labels).toMetadata()
     // If we are skipping invalid records, filter them out.
-    val filteredDataset = (getHandleInvalid) match {
-      case "skip" => {
+    val filteredDataset = getHandleInvalid match {
+      case "skip" =>
         val filterer = udf { label: String =>
           labelToIndex.contains(label)
         }
         dataset.where(filterer(dataset($(inputCol))))
-      }
       case _ => dataset
     }
     filteredDataset.select(col("*"),
       indexer(dataset($(inputCol)).cast(StringType)).as($(outputCol), metadata))
   }
 
-  override def transformSchema(schema: StructType): StructType = {
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
     if (schema.fieldNames.contains($(inputCol))) {
-      validateAndTransformSchema(schema)
+      val attr = NominalAttribute.defaultAttr.withName($(outputCol))
+      SchemaUtils.appendColumn(schema, attr.toStructField())
     } else {
       // If the input column does not exist during transformation, we skip StringIndexerModel.
+      // TODO: remove this hack
       schema
     }
   }
@@ -272,22 +261,13 @@ class IndexToString private[ml] (override val uid: String)
   /** @group getParam */
   final def getLabels: Array[String] = $(labels)
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputColName = $(inputCol)
-    val inputDataType = schema(inputColName).dataType
-    require(inputDataType.isInstanceOf[NumericType],
-      s"The input column $inputColName must be a numeric type, " +
-        s"but got $inputDataType.")
-    val inputFields = schema.fields
-    val outputColName = $(outputCol)
-    require(inputFields.forall(_.name != outputColName),
-      s"Output column $outputColName already exists.")
-    val outputFields = inputFields :+ StructField($(outputCol), StringType)
-    StructType(outputFields)
+  setInputColDataType(inputCol, Seq(DataTypes.NumericType))
+
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(outputCol), DataTypes.StringType)
   }
 
-  override def transform(dataset: DataFrame): DataFrame = {
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     val inputColSchema = dataset.schema($(inputCol))
     // If the labels array is empty use column metadata
     val values = if ($(labels).isEmpty) {

@@ -188,7 +188,7 @@ class StringIndexerSuite
   test("IndexToString.transformSchema (SPARK-10573)") {
     val idxToStr = new IndexToString().setInputCol("input").setOutputCol("output")
     val inSchema = StructType(Seq(StructField("input", DoubleType)))
-    val outSchema = idxToStr.transformSchema(inSchema)
+    val outSchema = idxToStr.transformSchema(inSchema, fitting = false)
     assert(outSchema("output").dataType === StringType)
   }
 

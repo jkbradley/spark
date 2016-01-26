@@ -144,6 +144,7 @@ private[classification] trait LogisticRegressionParams extends ProbabilisticClas
   }
 
   override def validateParams(): Unit = {
+    super.validateParams()
     checkThresholdConsistency()
   }
 }
@@ -158,7 +159,7 @@ private[classification] trait LogisticRegressionParams extends ProbabilisticClas
 @Experimental
 class LogisticRegression @Since("1.2.0") (
     @Since("1.4.0") override val uid: String)
-  extends ProbabilisticClassifier[Vector, LogisticRegression, LogisticRegressionModel]
+  extends ProbabilisticClassifier[LogisticRegression, LogisticRegressionModel]
   with LogisticRegressionParams with DefaultParamsWritable with Logging {
 
   @Since("1.4.0")
@@ -247,7 +248,7 @@ class LogisticRegression @Since("1.2.0") (
   @Since("1.5.0")
   override def getThresholds: Array[Double] = super.getThresholds
 
-  override protected def train(dataset: DataFrame): LogisticRegressionModel = {
+  override protected def fitImpl(dataset: DataFrame): LogisticRegressionModel = {
     // Extract columns from data.  If dataset is persisted, do not persist oldDataset.
     val w = if ($(weightCol).isEmpty) lit(1.0) else col($(weightCol))
     val instances: RDD[Instance] = dataset.select(col($(labelCol)), w, col($(featuresCol))).map {
@@ -420,7 +421,7 @@ class LogisticRegressionModel private[ml] (
     @Since("1.4.0") override val uid: String,
     @Since("1.6.0") val coefficients: Vector,
     @Since("1.3.0") val intercept: Double)
-  extends ProbabilisticClassificationModel[Vector, LogisticRegressionModel]
+  extends ProbabilisticClassificationModel[LogisticRegressionModel]
   with LogisticRegressionParams with MLWritable {
 
   @deprecated("Use coefficients instead.", "1.6.0")
@@ -479,7 +480,7 @@ class LogisticRegressionModel private[ml] (
       (LogisticRegressionModel, String) = {
     $(probabilityCol) match {
       case "" =>
-        val probabilityColName = "probability_" + java.util.UUID.randomUUID.toString()
+        val probabilityColName = "probability_" + java.util.UUID.randomUUID.toString
         (copy(ParamMap.empty).setProbabilityCol(probabilityColName), probabilityColName)
       case p => (this, p)
     }

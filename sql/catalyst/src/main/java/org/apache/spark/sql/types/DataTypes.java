@@ -89,6 +89,10 @@ public class DataTypes {
    */
   public static final DataType NullType = NullType$.MODULE$;
 
+  public static final AbstractDataType NumericType = NumericType$.MODULE$;
+
+  public static final AbstractDataType ArrayType = ArrayType$.MODULE$;
+
   /**
    * Creates an ArrayType by specifying the data type of elements ({@code elementType}).
    * The field of {@code containsNull} is set to {@code true}.
