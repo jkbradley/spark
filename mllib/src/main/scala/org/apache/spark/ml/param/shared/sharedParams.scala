@@ -187,8 +187,8 @@ private[ml] trait HasThresholds extends Params {
 }
 
 /**
-  * Trait for shared param inputCol.
-  */
+ * Trait for shared param inputCol.
+ */
 private[ml] trait HasInputCol extends Params {
 
   /**
@@ -202,8 +202,8 @@ private[ml] trait HasInputCol extends Params {
 }
 
 /**
-  * Trait for shared param inputCols.
-  */
+ * Trait for shared param inputCols.
+ */
 private[ml] trait HasInputCols extends Params {
 
   /**
@@ -217,8 +217,8 @@ private[ml] trait HasInputCols extends Params {
 }
 
 /**
-  * Trait for shared param outputCol (default: uid + "__output").
-  */
+ * Trait for shared param outputCol (default: uid + "__output").
+ */
 private[ml] trait HasOutputCol extends Params {
 
   /**
