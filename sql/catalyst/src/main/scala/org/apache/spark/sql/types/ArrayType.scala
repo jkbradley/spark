@@ -24,13 +24,13 @@ import org.json4s.JsonDSL._
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.sql.catalyst.util.ArrayData
 
-object ArrayType extends AbstractDataType {
+object ArrayType extends AbstractDataType with Serializable {
   /** Construct a [[ArrayType]] object with the given element type. The `containsNull` is true. */
   def apply(elementType: DataType): ArrayType = ArrayType(elementType, containsNull = true)
 
-  override private[sql] def defaultConcreteType: DataType = ArrayType(NullType, containsNull = true)
+  override def defaultConcreteType: DataType = ArrayType(NullType, containsNull = true)
 
-  override private[sql] def acceptsType(other: DataType): Boolean = {
+  override def acceptsType(other: DataType): Boolean = {
     other.isInstanceOf[ArrayType]
   }
 

@@ -76,6 +76,7 @@ object DeveloperApiExample {
       }.sum
     assert(sumPredictions == 0.0,
       "MyLogisticRegression predicted something other than 0, even though all coefficients are 0!")
+    model.transform(test.toDF()).show()
 
     sc.stop()
   }
@@ -120,7 +121,7 @@ private class MyLogisticRegression(override val uid: String)
   def setMaxIter(value: Int): this.type = set(maxIter, value)
 
   // This method is used by fit()
-  override protected def train(dataset: DataFrame): MyLogisticRegressionModel = {
+  override protected def fitImpl(dataset: DataFrame): MyLogisticRegressionModel = {
     // Extract columns from data using helper method.
     val oldDataset = extractLabeledPoints(dataset)
 
@@ -129,7 +130,7 @@ private class MyLogisticRegression(override val uid: String)
     val coefficients = Vectors.zeros(numFeatures) // Learning would happen here.
 
     // Create a model, and return it.
-    new MyLogisticRegressionModel(uid, coefficients).setParent(this)
+    new MyLogisticRegressionModel(uid, coefficients)
   }
 
   override def copy(extra: ParamMap): MyLogisticRegression = defaultCopy(extra)

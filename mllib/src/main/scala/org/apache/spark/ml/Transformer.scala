@@ -23,7 +23,9 @@ import org.apache.spark.Logging
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
+import org.apache.spark.ml.util.SchemaUtils
 import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
@@ -42,7 +44,7 @@ abstract class Transformer extends PipelineStage {
    * @return transformed dataset
    */
   @varargs
-  def transform(
+  final def transform(
       dataset: DataFrame,
       firstParamPair: ParamPair[_],
       otherParamPairs: ParamPair[_]*): DataFrame = {
@@ -58,14 +60,28 @@ abstract class Transformer extends PipelineStage {
    * @param paramMap additional parameters, overwrite embedded params
    * @return transformed dataset
    */
-  def transform(dataset: DataFrame, paramMap: ParamMap): DataFrame = {
+  final def transform(dataset: DataFrame, paramMap: ParamMap): DataFrame = {
     this.copy(paramMap).transform(dataset)
   }
 
   /**
    * Transforms the input dataset.
    */
-  def transform(dataset: DataFrame): DataFrame
+  final def transform(dataset: DataFrame): DataFrame = {
+    transformSchema(dataset.schema, fitting = false)
+    transformImpl(dataset)
+  }
+
+  // TODO: Remove this division if/when we merge Transformer, Estimator
+  protected final def transformSchemaImpl(schema: StructType, fitting: Boolean): StructType =
+    transformSchemaImpl(schema)
+
+  protected def transformSchemaImpl(schema: StructType): StructType
+
+  protected def transformImpl(dataset: DataFrame): DataFrame
+
+  // We could provide this for internal use (Pipeline).
+  private[ml] def transformWithoutCheck(dataset: DataFrame): DataFrame = transformImpl(dataset)
 
   override def copy(extra: ParamMap): Transformer
 }
@@ -97,25 +113,18 @@ abstract class UnaryTransformer[IN, OUT, T <: UnaryTransformer[IN, OUT, T]]
    */
   protected def outputDataType: DataType
 
-  /**
-   * Validates the input type. Throw an exception if it is invalid.
-   */
-  protected def validateInputType(inputType: DataType): Unit = {}
+  // Users should call setInputColDataType to check input schema.
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputType = schema($(inputCol)).dataType
-    validateInputType(inputType)
-    if (schema.fieldNames.contains($(outputCol))) {
-      throw new IllegalArgumentException(s"Output column ${$(outputCol)} already exists.")
-    }
-    val outputFields = schema.fields :+
-      StructField($(outputCol), outputDataType, nullable = false)
-    StructType(outputFields)
+  /**
+   * This only needs to be overridden if the input column metadata needs to be validated.
+   * NOTE: If we merge Transformer and Estimator, then we have to keep this fitting parameter.
+   *       If we split them, then we could remove "fitting" for Transformer.
+   */
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(outputCol), outputDataType)
   }
 
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     val transformUDF = udf(this.createTransformFunc, outputDataType)
     dataset.withColumn($(outputCol), transformUDF(dataset($(inputCol))))
   }

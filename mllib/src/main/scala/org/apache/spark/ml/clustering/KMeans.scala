@@ -20,8 +20,8 @@ package org.apache.spark.ml.clustering
 import org.apache.hadoop.fs.Path
 
 import org.apache.spark.annotation.{Experimental, Since}
-import org.apache.spark.ml.{Estimator, Model}
-import org.apache.spark.ml.param.{IntParam, Param, ParamMap, Params}
+import org.apache.spark.ml.{PipelineStage, Estimator, Model}
+import org.apache.spark.ml.param.{IntParam, Param, ParamMap}
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.clustering.{KMeans => MLlibKMeans, KMeansModel => MLlibKMeansModel}
@@ -33,8 +33,10 @@ import org.apache.spark.sql.types.{IntegerType, StructType}
 /**
  * Common params for KMeans and KMeansModel
  */
-private[clustering] trait KMeansParams extends Params with HasMaxIter with HasFeaturesCol
+private[clustering] trait KMeansParams extends PipelineStage with HasMaxIter with HasFeaturesCol
   with HasSeed with HasPredictionCol with HasTol {
+
+  setInputColDataType(featuresCol, Seq(new VectorUDT))
 
   /**
    * Set the number of clusters to create (k). Must be > 1. Default: 2.
@@ -73,17 +75,6 @@ private[clustering] trait KMeansParams extends Params with HasMaxIter with HasFe
   /** @group expertGetParam */
   @Since("1.5.0")
   def getInitSteps: Int = $(initSteps)
-
-  /**
-   * Validates and transforms the input schema.
-   * @param schema input schema
-   * @return output schema
-   */
-  protected def validateAndTransformSchema(schema: StructType): StructType = {
-    validateParams()
-    SchemaUtils.checkColumnType(schema, $(featuresCol), new VectorUDT)
-    SchemaUtils.appendColumn(schema, $(predictionCol), IntegerType)
-  }
 }
 
 /**
@@ -102,18 +93,16 @@ class KMeansModel private[ml] (
   @Since("1.5.0")
   override def copy(extra: ParamMap): KMeansModel = {
     val copied = new KMeansModel(uid, parentModel)
-    copyValues(copied, extra)
+    copyValues(copied, extra).setParent(this.parent)
   }
 
-  @Since("1.5.0")
-  override def transform(dataset: DataFrame): DataFrame = {
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     val predictUDF = udf((vector: Vector) => predict(vector))
     dataset.withColumn($(predictionCol), predictUDF(col($(featuresCol))))
   }
 
-  @Since("1.5.0")
-  override def transformSchema(schema: StructType): StructType = {
-    validateAndTransformSchema(schema)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(predictionCol), IntegerType)
   }
 
   private[clustering] def predict(features: Vector): Int = parentModel.predict(features)
@@ -238,7 +227,7 @@ class KMeans @Since("1.5.0") (
   def setSeed(value: Long): this.type = set(seed, value)
 
   @Since("1.5.0")
-  override def fit(dataset: DataFrame): KMeansModel = {
+  override protected def fitImpl(dataset: DataFrame): KMeansModel = {
     val rdd = dataset.select(col($(featuresCol))).map { case Row(point: Vector) => point }
 
     val algo = new MLlibKMeans()
@@ -249,13 +238,11 @@ class KMeans @Since("1.5.0") (
       .setSeed($(seed))
       .setEpsilon($(tol))
     val parentModel = algo.run(rdd)
-    val model = new KMeansModel(uid, parentModel)
-    copyValues(model)
+    new KMeansModel(uid, parentModel)
   }
 
-  @Since("1.5.0")
-  override def transformSchema(schema: StructType): StructType = {
-    validateAndTransformSchema(schema)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(predictionCol), IntegerType)
   }
 }
 
@@ -265,4 +252,3 @@ object KMeans extends DefaultParamsReadable[KMeans] {
   @Since("1.6.0")
   override def load(path: String): KMeans = super.load(path)
 }
-

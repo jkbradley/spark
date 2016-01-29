@@ -24,22 +24,12 @@ import org.apache.spark.ml.util.SchemaUtils
 import org.apache.spark.mllib.linalg.{Vector, VectorUDT}
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.types.StructType
 
 /**
  * (private[spark]) Params for classification.
  */
-private[spark] trait ClassifierParams
-  extends PredictorParams with HasRawPredictionCol {
-
-  override protected def validateAndTransformSchema(
-      schema: StructType,
-      fitting: Boolean,
-      featuresDataType: DataType): StructType = {
-    val parentSchema = super.validateAndTransformSchema(schema, fitting, featuresDataType)
-    SchemaUtils.appendColumn(parentSchema, $(rawPredictionCol), new VectorUDT)
-  }
-}
+private[spark] trait ClassifierParams extends PredictorParams with HasRawPredictionCol
 
 /**
  * :: DeveloperApi ::
@@ -60,6 +50,15 @@ abstract class Classifier[
 
   /** @group setParam */
   def setRawPredictionCol(value: String): E = set(rawPredictionCol, value).asInstanceOf[E]
+
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    val schema2 = super.transformSchemaImpl(schema)
+    if (isDefined(rawPredictionCol)) {
+      SchemaUtils.appendColumn(schema2, $(rawPredictionCol), new VectorUDT)
+    } else {
+      schema2
+    }
+  }
 
   // TODO: defaultEvaluator (follow-up PR)
 }
@@ -92,9 +91,7 @@ abstract class ClassificationModel[FeaturesType, M <: ClassificationModel[Featur
    * @param dataset input dataset
    * @return transformed dataset
    */
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
-
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     // Output selected columns only.
     // This is a bit complicated since it tries to avoid repeated computation.
     var outputData = dataset

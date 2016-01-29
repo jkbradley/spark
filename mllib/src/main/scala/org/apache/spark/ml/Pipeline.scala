@@ -20,6 +20,7 @@ package org.apache.spark.ml
 import java.{util => ju}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 import org.apache.hadoop.fs.Path
@@ -28,10 +29,10 @@ import org.json4s.jackson.JsonMethods._
 
 import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.annotation.{DeveloperApi, Experimental, Since}
-import org.apache.spark.ml.param.{Param, ParamMap, Params}
+import org.apache.spark.ml.param._
 import org.apache.spark.ml.util._
 import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{AbstractDataType, StructType}
 
 /**
  * :: DeveloperApi ::
@@ -40,13 +41,81 @@ import org.apache.spark.sql.types.StructType
 @DeveloperApi
 abstract class PipelineStage extends Params with Logging {
 
+  private val inputColDataTypes: mutable.Map[Param[_], Seq[AbstractDataType]] =
+    mutable.Map.empty[Param[_], Seq[AbstractDataType]]
+
+  /**
+   * Mapping: inputCol name -> valid data types.
+   * Note some are optional (weightCol), and some depend on fit/transform
+   */
+  final def getInputCols: Map[String, Seq[AbstractDataType]] = {
+    inputColDataTypes.flatMap {
+      case (colParam: InputColParam, types: Seq[AbstractDataType]) =>
+        Seq($(colParam) -> types)
+      case (colsParam: InputColsParam, types: Seq[AbstractDataType]) =>
+        $(colsParam).map(_ -> types)
+    }.toMap
+  }
+
+  /** Set the valid data types for the given input column */
+  protected final def setInputColDataType(
+      inputCol: InputColParam,
+      dataTypes: Seq[AbstractDataType]): Unit = {
+    inputColDataTypes(inputCol) = dataTypes
+  }
+
+  /** Set the valid data types for the given input columns */
+  protected final def setInputColDataType(
+      inputCols: InputColsParam,
+      dataTypes: Seq[AbstractDataType]): Unit = {
+    inputColDataTypes(inputCols) = dataTypes
+  }
+
+  // If set to false, then transform only
+  private val inputColFitOnly: mutable.Map[Param[_], Boolean] =
+    mutable.Map.empty[Param[_], Boolean]
+
+  /** Return true if this input column Param is used during fit() */
+  final def useForFit(param: Param[_]): Boolean = inputColFitOnly.get(param) match {
+    case Some(fitOnly) => fitOnly
+    case None => true
+  }
+
+  /** Return true if this input column Param is used during transform() */
+  final def useForTransform(param: Param[_]): Boolean = inputColFitOnly.get(param) match {
+    case Some(fitOnly) => !fitOnly
+    case None => true
+  }
+
+  /**
+   * Return true if this input column Param should be used given whether in fit() or transform().
+   * If not specified via [[setUseForFitOnly()]] or [[setUseForTransformOnly()]], then the Param
+   * is assumed to be used during both.
+   * @param fitting  True if in fit().  False if in transform()
+   */
+  final def useNow(param: Param[_], fitting: Boolean): Boolean = {
+    if (fitting) useForFit(param) else useForTransform(param)
+  }
+
+  /** Specify that this input column Param should be used during fit() and not transform(). */
+  protected final def setUseForFitOnly(inputCol: InputColParam): Unit = {
+    inputColFitOnly(inputCol) = true
+  }
+
+  /** Specify that this input column Param should be used during transform() and not fit(). */
+  protected final def setUseForTransformOnly(inputCol: InputColParam): Unit = {
+    inputColFitOnly(inputCol) = false
+  }
+
   /**
    * :: DeveloperApi ::
    *
    * Derives the output schema from the input schema.
+    * This also calls [[validateParams()]].
    */
   @DeveloperApi
-  def transformSchema(schema: StructType): StructType
+  final def transformSchema(schema: StructType, fitting: Boolean): StructType =
+    transformSchema(schema, fitting, logging = true)
 
   /**
    * :: DeveloperApi ::
@@ -57,18 +126,52 @@ abstract class PipelineStage extends Params with Logging {
    * be assumed valid until proven otherwise.
    */
   @DeveloperApi
-  protected def transformSchema(
+  final def transformSchema(
       schema: StructType,
+      fitting: Boolean,
       logging: Boolean): StructType = {
     if (logging) {
       logDebug(s"Input schema: ${schema.json}")
     }
-    val outputSchema = transformSchema(schema)
+    validateParams()
+    checkInputColDataTypes(schema, fitting)
+    val outputSchema = transformSchemaImpl(schema, fitting)
     if (logging) {
       logDebug(s"Expected output schema: ${outputSchema.json}")
     }
     outputSchema
   }
+
+  /**
+   * Called by [[transformSchema()]]
+   * @param inputSchema
+   */
+  protected def checkInputColDataTypes(inputSchema: StructType, fitting: Boolean): Unit = {
+    params.filter(p => useNow(p, fitting)).foreach {
+      // If input column appears in inputColDataTypes, check the type.  Otherwise, ignore it.
+      case colParam: InputColParam =>
+        inputColDataTypes.get(colParam).foreach { expectedTypes =>
+          SchemaUtils.checkColumnTypes(inputSchema, $(colParam), expectedTypes)
+        }
+      case colsParam: InputColsParam =>
+        inputColDataTypes.get(colsParam).foreach { expectedTypes =>
+          $(colsParam).foreach { col =>
+            SchemaUtils.checkColumnTypes(inputSchema, col, expectedTypes)
+          }
+        }
+      case _ => // do nothing
+    }
+  }
+
+  /**
+   * In implementing classes, this method should check the following items, as needed:
+   *  - input column metadata
+   *  - interacting input columns' schema
+   * This method does not need to check individual input columns' schema;
+   * that is handled by [[inputColDataTypes]].
+   * This should also compute the output schema.
+   */
+  protected def transformSchemaImpl(schema: StructType, fitting: Boolean): StructType
 
   override def copy(extra: ParamMap): PipelineStage
 }
@@ -94,7 +197,9 @@ class Pipeline(override val uid: String) extends Estimator[PipelineModel] with M
    * param for pipeline stages
    * @group param
    */
-  val stages: Param[Array[PipelineStage]] = new Param(this, "stages", "stages of the pipeline")
+  val stages: Param[Array[PipelineStage]] = new Param(this, "stages",
+    "stages of the pipeline, which should have unique UIDs",
+    isValid = (s: Array[PipelineStage]) => s.toSet.size == s.length)
 
   /** @group setParam */
   def setStages(value: Array[PipelineStage]): this.type = { set(stages, value); this }
@@ -121,8 +226,7 @@ class Pipeline(override val uid: String) extends Estimator[PipelineModel] with M
    * @param dataset input dataset
    * @return fitted pipeline
    */
-  override def fit(dataset: DataFrame): PipelineModel = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def fitImpl(dataset: DataFrame): PipelineModel = {
     val theStages = $(stages)
     // Search for the last estimator.
     var indexOfLastEstimator = -1
@@ -155,21 +259,19 @@ class Pipeline(override val uid: String) extends Estimator[PipelineModel] with M
       }
     }
 
-    new PipelineModel(uid, transformers.toArray).setParent(this)
+    new PipelineModel(uid, transformers.toArray)
   }
 
   override def copy(extra: ParamMap): Pipeline = {
     val map = extractParamMap(extra)
     val newStages = map(stages).map(_.copy(extra))
-    new Pipeline().setStages(newStages)
+    new Pipeline(uid).setStages(newStages)
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val theStages = $(stages)
-    require(theStages.toSet.size == theStages.length,
-      "Cannot have duplicate components in a pipeline.")
-    theStages.foldLeft(schema)((cur, stage) => stage.transformSchema(cur))
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    $(stages).foldLeft(schema) { (cur, stage) =>
+      stage.transformSchema(cur, fitting = true, logging = false)
+    }
   }
 
   @Since("1.6.0")
@@ -291,14 +393,14 @@ class PipelineModel private[ml] (
     stages.foreach(_.validateParams())
   }
 
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
-    stages.foldLeft(dataset)((cur, transformer) => transformer.transform(cur))
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
+    stages.foldLeft(dataset)((cur, transformer) => transformer.transformWithoutCheck(cur))
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    stages.foldLeft(schema)((cur, transformer) => transformer.transformSchema(cur))
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    stages.foldLeft(schema) { (cur, transformer) =>
+      transformer.transformSchema(cur, fitting = false, logging = false)
+    }
   }
 
   override def copy(extra: ParamMap): PipelineModel = {

@@ -62,7 +62,8 @@ private[ml] trait HasFeaturesCol extends Params {
    * Param for features column name.
    * @group param
    */
-  final val featuresCol: Param[String] = new Param[String](this, "featuresCol", "features column name")
+  final val featuresCol: InputColParam =
+    new InputColParam(this, "featuresCol", "features column name")
 
   setDefault(featuresCol, "features")
 
@@ -79,7 +80,7 @@ private[ml] trait HasLabelCol extends Params {
    * Param for label column name.
    * @group param
    */
-  final val labelCol: Param[String] = new Param[String](this, "labelCol", "label column name")
+  final val labelCol: InputColParam = new InputColParam(this, "labelCol", "label column name")
 
   setDefault(labelCol, "label")
 
@@ -96,7 +97,7 @@ private[ml] trait HasPredictionCol extends Params {
    * Param for prediction column name.
    * @group param
    */
-  final val predictionCol: Param[String] = new Param[String](this, "predictionCol", "prediction column name")
+  final val predictionCol: OutputColParam = new OutputColParam(this, "predictionCol", "prediction column name")
 
   setDefault(predictionCol, "prediction")
 
@@ -113,7 +114,7 @@ private[ml] trait HasRawPredictionCol extends Params {
    * Param for raw prediction (a.k.a. confidence) column name.
    * @group param
    */
-  final val rawPredictionCol: Param[String] = new Param[String](this, "rawPredictionCol", "raw prediction (a.k.a. confidence) column name")
+  final val rawPredictionCol: OutputColParam = new OutputColParam(this, "rawPredictionCol", "raw prediction (a.k.a. confidence) column name")
 
   setDefault(rawPredictionCol, "rawPrediction")
 
@@ -130,7 +131,7 @@ private[ml] trait HasProbabilityCol extends Params {
    * Param for Column name for predicted class conditional probabilities. Note: Not all models output well-calibrated probability estimates! These probabilities should be treated as confidences, not precise probabilities.
    * @group param
    */
-  final val probabilityCol: Param[String] = new Param[String](this, "probabilityCol", "Column name for predicted class conditional probabilities. Note: Not all models output well-calibrated probability estimates! These probabilities should be treated as confidences, not precise probabilities")
+  final val probabilityCol: OutputColParam = new OutputColParam(this, "probabilityCol", "Column name for predicted class conditional probabilities. Note: Not all models output well-calibrated probability estimates! These probabilities should be treated as confidences, not precise probabilities")
 
   setDefault(probabilityCol, "probability")
 
@@ -147,7 +148,7 @@ private[ml] trait HasVarianceCol extends Params {
    * Param for Column name for the biased sample variance of prediction.
    * @group param
    */
-  final val varianceCol: Param[String] = new Param[String](this, "varianceCol", "Column name for the biased sample variance of prediction")
+  final val varianceCol: OutputColParam = new OutputColParam(this, "varianceCol", "Column name for the biased sample variance of prediction")
 
   /** @group getParam */
   final def getVarianceCol: String = $(varianceCol)
@@ -194,7 +195,7 @@ private[ml] trait HasInputCol extends Params {
    * Param for input column name.
    * @group param
    */
-  final val inputCol: Param[String] = new Param[String](this, "inputCol", "input column name")
+  final val inputCol: InputColParam = new InputColParam(this, "inputCol", "input column name")
 
   /** @group getParam */
   final def getInputCol: String = $(inputCol)
@@ -209,7 +210,7 @@ private[ml] trait HasInputCols extends Params {
    * Param for input column names.
    * @group param
    */
-  final val inputCols: StringArrayParam = new StringArrayParam(this, "inputCols", "input column names")
+  final val inputCols: InputColsParam = new InputColsParam(this, "inputCols", "input column names")
 
   /** @group getParam */
   final def getInputCols: Array[String] = $(inputCols)
@@ -224,7 +225,7 @@ private[ml] trait HasOutputCol extends Params {
    * Param for output column name.
    * @group param
    */
-  final val outputCol: Param[String] = new Param[String](this, "outputCol", "output column name")
+  final val outputCol: OutputColParam = new OutputColParam(this, "outputCol", "output column name")
 
   setDefault(outputCol, uid + "__output")
 

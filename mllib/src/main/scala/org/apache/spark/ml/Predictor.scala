@@ -26,7 +26,7 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DataType, DoubleType, StructType}
+import org.apache.spark.sql.types.{DataType, DataTypes, DoubleType, StructType}
 
 /**
  * (private[ml])  Trait for parameters for prediction (regression and classification).
@@ -34,27 +34,7 @@ import org.apache.spark.sql.types.{DataType, DoubleType, StructType}
 private[ml] trait PredictorParams extends Params
   with HasLabelCol with HasFeaturesCol with HasPredictionCol {
 
-  /**
-   * Validates and transforms the input schema with the provided param map.
-   * @param schema input schema
-   * @param fitting whether this is in fitting
-   * @param featuresDataType  SQL DataType for FeaturesType.
-   *                          E.g., [[org.apache.spark.mllib.linalg.VectorUDT]] for vector features.
-   * @return output schema
-   */
-  protected def validateAndTransformSchema(
-      schema: StructType,
-      fitting: Boolean,
-      featuresDataType: DataType): StructType = {
-    validateParams()
-    // TODO: Support casting Array[Double] and Array[Float] to Vector when FeaturesType = Vector
-    SchemaUtils.checkColumnType(schema, $(featuresCol), featuresDataType)
-    if (fitting) {
-      // TODO: Allow other numeric types
-      SchemaUtils.checkColumnType(schema, $(labelCol), DoubleType)
-    }
-    SchemaUtils.appendColumn(schema, $(predictionCol), DoubleType)
-  }
+  // TODO: Support casting Array[Double] and Array[Float] to Vector when FeaturesType = Vector
 }
 
 /**
@@ -75,6 +55,10 @@ abstract class Predictor[
     M <: PredictionModel[FeaturesType, M]]
   extends Estimator[M] with PredictorParams {
 
+  setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
+  setUseForFitOnly(labelCol)
+  setInputColDataType(featuresCol, Seq(new VectorUDT))
+
   /** @group setParam */
   def setLabelCol(value: String): Learner = set(labelCol, value).asInstanceOf[Learner]
 
@@ -84,38 +68,26 @@ abstract class Predictor[
   /** @group setParam */
   def setPredictionCol(value: String): Learner = set(predictionCol, value).asInstanceOf[Learner]
 
-  override def fit(dataset: DataFrame): M = {
-    // This handles a few items such as schema validation.
-    // Developers only need to implement train().
-    transformSchema(dataset.schema, logging = true)
-    copyValues(train(dataset).setParent(this))
-  }
-
   override def copy(extra: ParamMap): Learner
 
-  /**
-   * Train a model using the given dataset and parameters.
-   * Developers can implement this instead of [[fit()]] to avoid dealing with schema validation
-   * and copying parameters into the model.
-   *
-   * @param dataset  Training dataset
-   * @return  Fitted model
-   */
-  protected def train(dataset: DataFrame): M
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    if (isDefined(predictionCol)) {
+      SchemaUtils.appendColumn(schema, $(predictionCol), DoubleType)
+    } else {
+      schema
+    }
+  }
 
   /**
    * Returns the SQL DataType corresponding to the FeaturesType type parameter.
    *
-   * This is used by [[validateAndTransformSchema()]].
+   * NOTE: I hope to get rid of this for Spark 2.0, but that's not related to this prototype.
+   * This is used by schema validation.
    * This workaround is needed since SQL has different APIs for Scala and Java.
    *
    * The default value is VectorUDT, but it may be overridden if FeaturesType is not Vector.
    */
   private[ml] def featuresDataType: DataType = new VectorUDT
-
-  override def transformSchema(schema: StructType): StructType = {
-    validateAndTransformSchema(schema, fitting = true, featuresDataType)
-  }
 
   /**
    * Extract [[labelCol]] and [[featuresCol]] from the given dataset,
@@ -140,6 +112,10 @@ abstract class Predictor[
 abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, M]]
   extends Model[M] with PredictorParams {
 
+  setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
+  setUseForFitOnly(labelCol)
+  setInputColDataType(featuresCol, Seq(new VectorUDT))
+
   /** @group setParam */
   def setFeaturesCol(value: String): M = set(featuresCol, value).asInstanceOf[M]
 
@@ -153,15 +129,20 @@ abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, 
   /**
    * Returns the SQL DataType corresponding to the FeaturesType type parameter.
    *
-   * This is used by [[validateAndTransformSchema()]].
+   * NOTE: I hope to get rid of this for Spark 2.0, but that's not related to this prototype.
+   * This is used by schema validation.
    * This workaround is needed since SQL has different APIs for Scala and Java.
    *
    * The default value is VectorUDT, but it may be overridden if FeaturesType is not Vector.
    */
-  protected def featuresDataType: DataType = new VectorUDT
+  private[ml] def featuresDataType: DataType = new VectorUDT
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateAndTransformSchema(schema, fitting = false, featuresDataType)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    if (isDefined(predictionCol)) {
+      SchemaUtils.appendColumn(schema, $(predictionCol), DoubleType)
+    } else {
+      schema
+    }
   }
 
   /**
@@ -171,22 +152,15 @@ abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, 
    * @param dataset input dataset
    * @return transformed dataset with [[predictionCol]] of type [[Double]]
    */
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     if ($(predictionCol).nonEmpty) {
-      transformImpl(dataset)
+      val predictUDF = udf { (features: Any) =>
+        predict(features.asInstanceOf[FeaturesType])
+      }
+      dataset.withColumn($(predictionCol), predictUDF(col($(featuresCol))))
     } else {
-      this.logWarning(s"$uid: Predictor.transform() was called as NOOP" +
-        " since no output columns were set.")
       dataset
     }
-  }
-
-  protected def transformImpl(dataset: DataFrame): DataFrame = {
-    val predictUDF = udf { (features: Any) =>
-      predict(features.asInstanceOf[FeaturesType])
-    }
-    dataset.withColumn($(predictionCol), predictUDF(col($(featuresCol))))
   }
 
   /**

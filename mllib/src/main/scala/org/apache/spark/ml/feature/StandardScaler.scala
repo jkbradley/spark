@@ -28,12 +28,15 @@ import org.apache.spark.mllib.feature
 import org.apache.spark.mllib.linalg.{Vector, VectorUDT}
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{StructField, StructType}
+import org.apache.spark.sql.types.StructType
 
 /**
  * Params for [[StandardScaler]] and [[StandardScalerModel]].
  */
-private[feature] trait StandardScalerParams extends Params with HasInputCol with HasOutputCol {
+private[feature] trait StandardScalerParams
+  extends PipelineStage with HasInputCol with HasOutputCol {
+
+  setInputColDataType(inputCol, Seq(new VectorUDT))
 
   /**
    * Whether to center the data with mean before scaling.
@@ -85,23 +88,15 @@ class StandardScaler(override val uid: String) extends Estimator[StandardScalerM
   /** @group setParam */
   def setWithStd(value: Boolean): this.type = set(withStd, value)
 
-  override def fit(dataset: DataFrame): StandardScalerModel = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def fitImpl(dataset: DataFrame): StandardScalerModel = {
     val input = dataset.select($(inputCol)).map { case Row(v: Vector) => v }
     val scaler = new feature.StandardScaler(withMean = $(withMean), withStd = $(withStd))
     val scalerModel = scaler.fit(input)
-    copyValues(new StandardScalerModel(uid, scalerModel.std, scalerModel.mean).setParent(this))
+    new StandardScalerModel(uid, scalerModel.std, scalerModel.mean)
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputType = schema($(inputCol)).dataType
-    require(inputType.isInstanceOf[VectorUDT],
-      s"Input column ${$(inputCol)} must be a vector column")
-    require(!schema.fieldNames.contains($(outputCol)),
-      s"Output column ${$(outputCol)} already exists.")
-    val outputFields = schema.fields :+ StructField($(outputCol), new VectorUDT, false)
-    StructType(outputFields)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(outputCol), new VectorUDT)
   }
 
   override def copy(extra: ParamMap): StandardScaler = defaultCopy(extra)
@@ -136,22 +131,14 @@ class StandardScalerModel private[ml] (
   /** @group setParam */
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
-  override def transform(dataset: DataFrame): DataFrame = {
-    transformSchema(dataset.schema, logging = true)
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     val scaler = new feature.StandardScalerModel(std, mean, $(withStd), $(withMean))
     val scale = udf { scaler.transform _ }
     dataset.withColumn($(outputCol), scale(col($(inputCol))))
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputType = schema($(inputCol)).dataType
-    require(inputType.isInstanceOf[VectorUDT],
-      s"Input column ${$(inputCol)} must be a vector column")
-    require(!schema.fieldNames.contains($(outputCol)),
-      s"Output column ${$(outputCol)} already exists.")
-    val outputFields = schema.fields :+ StructField($(outputCol), new VectorUDT, false)
-    StructType(outputFields)
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, $(outputCol), new VectorUDT)
   }
 
   override def copy(extra: ParamMap): StandardScalerModel = {

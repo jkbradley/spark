@@ -22,6 +22,7 @@ import scala.annotation.varargs
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.ml.param.{ParamMap, ParamPair}
 import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.types.StructType
 
 /**
  * :: DeveloperApi ::
@@ -40,7 +41,7 @@ abstract class Estimator[M <: Model[M]] extends PipelineStage {
    * @return fitted model
    */
   @varargs
-  def fit(dataset: DataFrame, firstParamPair: ParamPair[_], otherParamPairs: ParamPair[_]*): M = {
+  final def fit(dataset: DataFrame, firstParamPair: ParamPair[_], otherParamPairs: ParamPair[_]*): M = {
     val map = new ParamMap()
       .put(firstParamPair)
       .put(otherParamPairs: _*)
@@ -55,14 +56,18 @@ abstract class Estimator[M <: Model[M]] extends PipelineStage {
    *                 These values override any specified in this Estimator's embedded ParamMap.
    * @return fitted model
    */
-  def fit(dataset: DataFrame, paramMap: ParamMap): M = {
+  final def fit(dataset: DataFrame, paramMap: ParamMap): M = {
     copy(paramMap).fit(dataset)
   }
 
   /**
    * Fits a model to the input data.
    */
-  def fit(dataset: DataFrame): M
+  final def fit(dataset: DataFrame): M = {
+    transformSchema(dataset.schema, fitting = true)
+    val model = fitImpl(dataset)
+    copyValues(model).setParent(this)
+  }
 
   /**
    * Fits multiple models to the input data with multiple sets of parameters.
@@ -74,9 +79,17 @@ abstract class Estimator[M <: Model[M]] extends PipelineStage {
    *                  These values override any specified in this Estimator's embedded ParamMap.
    * @return fitted models, matching the input parameter maps
    */
-  def fit(dataset: DataFrame, paramMaps: Array[ParamMap]): Seq[M] = {
+  final def fit(dataset: DataFrame, paramMaps: Array[ParamMap]): Seq[M] = {
     paramMaps.map(fit(dataset, _))
   }
+
+  // TODO: Remove this division if/when we merge Transformer, Estimator
+  protected final def transformSchemaImpl(schema: StructType, fitting: Boolean): StructType =
+    transformSchemaImpl(schema)
+
+  protected def transformSchemaImpl(schema: StructType): StructType
+
+  protected def fitImpl(dataset: DataFrame): M
 
   override def copy(extra: ParamMap): Estimator[M]
 }

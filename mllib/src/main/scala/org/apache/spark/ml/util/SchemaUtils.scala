@@ -17,7 +17,7 @@
 
 package org.apache.spark.ml.util
 
-import org.apache.spark.sql.types.{DataType, StructField, StructType}
+import org.apache.spark.sql.types.{AbstractDataType, DataType, StructField, StructType}
 
 
 /**
@@ -35,12 +35,23 @@ private[spark] object SchemaUtils {
   def checkColumnType(
       schema: StructType,
       colName: String,
-      dataType: DataType,
+      dataType: AbstractDataType,
       msg: String = ""): Unit = {
     val actualDataType = schema(colName).dataType
     val message = if (msg != null && msg.trim.length > 0) " " + msg else ""
-    require(actualDataType.equals(dataType),
+    require(dataType.acceptsType(actualDataType),
       s"Column $colName must be of type $dataType but was actually $actualDataType.$message")
+  }
+
+  def checkColumnTypes(
+      schema: StructType,
+      colName: String,
+      dataTypes: Seq[AbstractDataType],
+      msg: String = ""): Unit = {
+    val actualDataType = schema(colName).dataType
+    val message = if (msg != null && msg.trim.length > 0) " " + msg else ""
+    require(dataTypes.exists(_.acceptsType(actualDataType)),
+      s"Column $colName must be of type in {${dataTypes.mkString(", ")} but was actually $actualDataType.$message")
   }
 
   /**

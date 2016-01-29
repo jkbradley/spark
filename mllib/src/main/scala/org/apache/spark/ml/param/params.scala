@@ -30,6 +30,7 @@ import org.json4s.jackson.JsonMethods._
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.sql.types.AbstractDataType
 
 /**
  * :: DeveloperApi ::
@@ -419,16 +420,46 @@ class BooleanParam(parent: String, name: String, doc: String) // No need for isV
   }
 }
 
+@DeveloperApi
+class StringParam(parent: String, name: String, doc: String, isValid: String => Boolean)
+  extends Param[String](parent, name, doc, isValid) {
+
+  def this(parent: String, name: String, doc: String) =
+    this(parent, name, doc, ParamValidators.alwaysTrue[String])
+
+  def this(parent: Identifiable, name: String, doc: String) = this(parent.uid, name, doc)
+}
+
+@DeveloperApi
+class InputColParam(parent: String, name: String, doc: String, isValid: String => Boolean)
+  extends StringParam(parent, name, doc, isValid) {
+
+  def this(parent: String, name: String, doc: String) = this(parent, name, doc,
+    ParamValidators.alwaysTrue[String])
+
+  def this(parent: Identifiable, name: String, doc: String) = this(parent.uid, name, doc)
+}
+
+@DeveloperApi
+class OutputColParam(parent: String, name: String, doc: String, isValid: String => Boolean)
+  extends StringParam(parent, name, doc, isValid) {
+
+  def this(parent: String, name: String, doc: String) = this(parent, name, doc,
+    ParamValidators.alwaysTrue[String])
+
+  def this(parent: Identifiable, name: String, doc: String) = this(parent.uid, name, doc)
+}
+
 /**
  * :: DeveloperApi ::
  * Specialized version of [[Param[Array[String]]]] for Java.
  */
 @DeveloperApi
-class StringArrayParam(parent: Params, name: String, doc: String, isValid: Array[String] => Boolean)
+class StringArrayParam(parent: String, name: String, doc: String, isValid: Array[String] => Boolean)
   extends Param[Array[String]](parent, name, doc, isValid) {
 
-  def this(parent: Params, name: String, doc: String) =
-    this(parent, name, doc, ParamValidators.alwaysTrue)
+  def this(parent: Identifiable, name: String, doc: String) =
+    this(parent.uid, name, doc, ParamValidators.alwaysTrue)
 
   /** Creates a param pair with a [[java.util.List]] of values (for Java and Python). */
   def w(value: java.util.List[String]): ParamPair[Array[String]] = w(value.asScala.toArray)
@@ -442,6 +473,16 @@ class StringArrayParam(parent: Params, name: String, doc: String, isValid: Array
     implicit val formats = DefaultFormats
     parse(json).extract[Seq[String]].toArray
   }
+}
+
+@DeveloperApi
+class InputColsParam(parent: String, name: String, doc: String, isValid: Array[String] => Boolean)
+  extends StringArrayParam(parent, name, doc, isValid) {
+
+  def this(parent: String, name: String, doc: String) = this(parent, name, doc,
+    ParamValidators.alwaysTrue[Array[String]])
+
+  def this(parent: Identifiable, name: String, doc: String) = this(parent.uid, name, doc)
 }
 
 /**

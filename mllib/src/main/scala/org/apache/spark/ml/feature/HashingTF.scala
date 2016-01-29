@@ -26,7 +26,7 @@ import org.apache.spark.ml.util._
 import org.apache.spark.mllib.feature
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.functions.{col, udf}
-import org.apache.spark.sql.types.{ArrayType, StructType}
+import org.apache.spark.sql.types.{DataTypes, StructField, StructType}
 
 /**
  * :: Experimental ::
@@ -60,21 +60,19 @@ class HashingTF(override val uid: String)
   /** @group setParam */
   def setNumFeatures(value: Int): this.type = set(numFeatures, value)
 
-  override def transform(dataset: DataFrame): DataFrame = {
-    val outputSchema = transformSchema(dataset.schema)
+  setInputColDataType(inputCol, Seq(DataTypes.ArrayType))
+
+  private def getOutputField: StructField =
+    new AttributeGroup($(outputCol), $(numFeatures)).toStructField()
+
+  override protected def transformImpl(dataset: DataFrame): DataFrame = {
     val hashingTF = new feature.HashingTF($(numFeatures))
     val t = udf { terms: Seq[_] => hashingTF.transform(terms) }
-    val metadata = outputSchema($(outputCol)).metadata
-    dataset.select(col("*"), t(col($(inputCol))).as($(outputCol), metadata))
+    dataset.select(col("*"), t(col($(inputCol))).as($(outputCol), getOutputField.metadata))
   }
 
-  override def transformSchema(schema: StructType): StructType = {
-    validateParams()
-    val inputType = schema($(inputCol)).dataType
-    require(inputType.isInstanceOf[ArrayType],
-      s"The input column must be ArrayType, but got $inputType.")
-    val attrGroup = new AttributeGroup($(outputCol), $(numFeatures))
-    SchemaUtils.appendColumn(schema, attrGroup.toStructField())
+  override protected def transformSchemaImpl(schema: StructType): StructType = {
+    SchemaUtils.appendColumn(schema, getOutputField)
   }
 
   override def copy(extra: ParamMap): HashingTF = defaultCopy(extra)

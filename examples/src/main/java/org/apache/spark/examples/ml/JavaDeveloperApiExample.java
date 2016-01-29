@@ -91,6 +91,7 @@ public class JavaDeveloperApiExample {
       throw new Exception("MyJavaLogisticRegression predicted something other than 0," +
           " even though all coefficients are 0!");
     }
+    results.show();
 
     jsc.stop();
   }
@@ -145,7 +146,7 @@ class MyJavaLogisticRegression
 
   // This method is used by fit().
   // In Java, we have to make it public since Java does not understand Scala's protected modifier.
-  public MyJavaLogisticRegressionModel train(DataFrame dataset) {
+  public MyJavaLogisticRegressionModel fitImpl(DataFrame dataset) {
     // Extract columns from data using helper method.
     JavaRDD<LabeledPoint> oldDataset = extractLabeledPoints(dataset).toJavaRDD();
 
