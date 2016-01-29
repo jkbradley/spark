@@ -41,6 +41,8 @@ private[ml] trait PredictorParams extends Params
  * :: DeveloperApi ::
  * Abstraction for prediction problems (regression and classification).
  *
+ * @tparam FeaturesType  Type of features.
+ *                       E.g., [[org.apache.spark.mllib.linalg.VectorUDT]] for vector features.
  * @tparam Learner  Specialization of this class.  If you subclass this type, use this type
  *                  parameter to specify the concrete type.
  * @tparam M  Specialization of [[PredictionModel]].  If you subclass this type, use this type
@@ -48,8 +50,9 @@ private[ml] trait PredictorParams extends Params
  */
 @DeveloperApi
 abstract class Predictor[
-    Learner <: Predictor[Learner, M],
-    M <: PredictionModel[M]]
+    FeaturesType,
+    Learner <: Predictor[FeaturesType, Learner, M],
+    M <: PredictionModel[FeaturesType, M]]
   extends Estimator[M] with PredictorParams {
 
   setInputColDataType(labelCol, Seq(DataTypes.DoubleType))
@@ -89,11 +92,13 @@ abstract class Predictor[
  * :: DeveloperApi ::
  * Abstraction for a model for prediction tasks (regression and classification).
  *
+ * @tparam FeaturesType  Type of features.
+ *                       E.g., [[org.apache.spark.mllib.linalg.VectorUDT]] for vector features.
  * @tparam M  Specialization of [[PredictionModel]].  If you subclass this type, use this type
  *            parameter to specify the concrete type for the corresponding model.
  */
 @DeveloperApi
-abstract class PredictionModel[M <: PredictionModel[M]]
+abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, M]]
   extends Model[M] with PredictorParams {
 
   setInputColDataType(labelCol, Seq(DataTypes.DoubleType))

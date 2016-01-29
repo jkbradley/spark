@@ -159,7 +159,7 @@ private[classification] trait LogisticRegressionParams extends ProbabilisticClas
 @Experimental
 class LogisticRegression @Since("1.2.0") (
     @Since("1.4.0") override val uid: String)
-  extends ProbabilisticClassifier[LogisticRegression, LogisticRegressionModel]
+  extends ProbabilisticClassifier[Vector, LogisticRegression, LogisticRegressionModel]
   with LogisticRegressionParams with DefaultParamsWritable with Logging {
 
   @Since("1.4.0")
@@ -421,7 +421,7 @@ class LogisticRegressionModel private[ml] (
     @Since("1.4.0") override val uid: String,
     @Since("1.6.0") val coefficients: Vector,
     @Since("1.3.0") val intercept: Double)
-  extends ProbabilisticClassificationModel[LogisticRegressionModel]
+  extends ProbabilisticClassificationModel[Vector, LogisticRegressionModel]
   with LogisticRegressionParams with MLWritable {
 
   @deprecated("Use coefficients instead.", "1.6.0")

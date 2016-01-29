@@ -105,7 +105,7 @@ public class JavaDeveloperApiExample {
  *       However, this should still compile and run successfully.
  */
 class MyJavaLogisticRegression
-  extends Classifier<MyJavaLogisticRegression, MyJavaLogisticRegressionModel> {
+  extends Classifier<Vector, MyJavaLogisticRegression, MyJavaLogisticRegressionModel> {
 
   public MyJavaLogisticRegression() {
     init();
@@ -172,7 +172,7 @@ class MyJavaLogisticRegression
  *       However, this should still compile and run successfully.
  */
 class MyJavaLogisticRegressionModel
-  extends ClassificationModel<MyJavaLogisticRegressionModel> {
+  extends ClassificationModel<Vector, MyJavaLogisticRegressionModel> {
 
   private Vector coefficients_;
   public Vector coefficients() { return coefficients_; }

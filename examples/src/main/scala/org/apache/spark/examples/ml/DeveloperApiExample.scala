@@ -110,7 +110,7 @@ private trait MyLogisticRegressionParams extends ClassifierParams {
  * NOTE: This is private since it is an example.  In practice, you may not want it to be private.
  */
 private class MyLogisticRegression(override val uid: String)
-  extends Classifier[MyLogisticRegression, MyLogisticRegressionModel]
+  extends Classifier[Vector, MyLogisticRegression, MyLogisticRegressionModel]
   with MyLogisticRegressionParams {
 
   def this() = this(Identifiable.randomUID("myLogReg"))
@@ -144,7 +144,7 @@ private class MyLogisticRegression(override val uid: String)
 private class MyLogisticRegressionModel(
     override val uid: String,
     val coefficients: Vector)
-  extends ClassificationModel[MyLogisticRegressionModel]
+  extends ClassificationModel[Vector, MyLogisticRegressionModel]
   with MyLogisticRegressionParams {
 
   // This uses the default implementation of transform(), which reads column "features" and outputs

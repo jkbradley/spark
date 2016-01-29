@@ -37,14 +37,16 @@ private[classification] trait ProbabilisticClassifierParams
  *
  * Single-label binary or multiclass classifier which can output class conditional probabilities.
  *
+ * @tparam FeaturesType  Type of input features.  E.g., [[Vector]]
  * @tparam E  Concrete Estimator type
  * @tparam M  Concrete Model type
  */
 @DeveloperApi
 abstract class ProbabilisticClassifier[
-    E <: ProbabilisticClassifier[E, M],
-    M <: ProbabilisticClassificationModel[M]]
-  extends Classifier[E, M] with ProbabilisticClassifierParams {
+    FeaturesType,
+    E <: ProbabilisticClassifier[FeaturesType, E, M],
+    M <: ProbabilisticClassificationModel[FeaturesType, M]]
+  extends Classifier[FeaturesType, E, M] with ProbabilisticClassifierParams {
 
   override protected def transformSchemaImpl(schema: StructType): StructType = {
     val schema2 = super.transformSchemaImpl(schema)
@@ -69,12 +71,14 @@ abstract class ProbabilisticClassifier[
  * Model produced by a [[ProbabilisticClassifier]].
  * Classes are indexed {0, 1, ..., numClasses - 1}.
  *
+ * @tparam FeaturesType  Type of input features.  E.g., [[Vector]]
  * @tparam M  Concrete Model type
  */
 @DeveloperApi
 abstract class ProbabilisticClassificationModel[
-    M <: ProbabilisticClassificationModel[M]]
-  extends ClassificationModel[M] with ProbabilisticClassifierParams {
+    FeaturesType,
+    M <: ProbabilisticClassificationModel[FeaturesType, M]]
+  extends ClassificationModel[FeaturesType, M] with ProbabilisticClassifierParams {
 
   /** @group setParam */
   def setProbabilityCol(value: String): M = set(probabilityCol, value).asInstanceOf[M]
@@ -114,28 +118,34 @@ abstract class ProbabilisticClassificationModel[
     // This is a bit complicated since it tries to avoid repeated computation.
     var outputData = dataset
     var numColsOutput = 0
-    if (isDefined(rawPredictionCol)) {
-      val predictRawUDF = udf { (features: Vector) => predictRaw(features) }
+    if ($(rawPredictionCol).nonEmpty) {
+      val predictRawUDF = udf { (features: Any) =>
+        predictRaw(features.asInstanceOf[FeaturesType])
+      }
       outputData = outputData.withColumn(getRawPredictionCol, predictRawUDF(col(getFeaturesCol)))
       numColsOutput += 1
     }
-    if (isDefined(probabilityCol)) {
-      val probUDF = if (isDefined(rawPredictionCol)) {
+    if ($(probabilityCol).nonEmpty) {
+      val probUDF = if ($(rawPredictionCol).nonEmpty) {
         udf(raw2probability _).apply(col($(rawPredictionCol)))
       } else {
-        val probabilityUDF = udf { (features: Vector) => predictProbability(features) }
+        val probabilityUDF = udf { (features: Any) =>
+          predictProbability(features.asInstanceOf[FeaturesType])
+        }
         probabilityUDF(col($(featuresCol)))
       }
       outputData = outputData.withColumn($(probabilityCol), probUDF)
       numColsOutput += 1
     }
-    if (isDefined(predictionCol)) {
-      val predUDF = if (isDefined(rawPredictionCol)) {
+    if ($(predictionCol).nonEmpty) {
+      val predUDF = if ($(rawPredictionCol).nonEmpty) {
         udf(raw2prediction _).apply(col($(rawPredictionCol)))
-      } else if (isDefined(probabilityCol)) {
+      } else if ($(probabilityCol).nonEmpty) {
         udf(probability2prediction _).apply(col($(probabilityCol)))
       } else {
-        val predictUDF = udf { (features: Vector) => predict(features) }
+        val predictUDF = udf { (features: Any) =>
+          predict(features.asInstanceOf[FeaturesType])
+        }
         predictUDF(col($(featuresCol)))
       }
       outputData = outputData.withColumn($(predictionCol), predUDF)
@@ -182,7 +192,7 @@ abstract class ProbabilisticClassificationModel[
    *
    * @return Estimated class conditional probabilities
    */
-  protected def predictProbability(features: Vector): Vector = {
+  protected def predictProbability(features: FeaturesType): Vector = {
     val rawPreds = predictRaw(features)
     raw2probabilityInPlace(rawPreds)
   }

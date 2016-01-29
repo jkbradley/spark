@@ -37,14 +37,16 @@ private[spark] trait ClassifierParams extends PredictorParams with HasRawPredict
  * Single-label binary or multiclass classification.
  * Classes are indexed {0, 1, ..., numClasses - 1}.
  *
+ * @tparam FeaturesType  Type of input features.  E.g., [[Vector]]
  * @tparam E  Concrete Estimator type
  * @tparam M  Concrete Model type
  */
 @DeveloperApi
 abstract class Classifier[
-    E <: Classifier[E, M],
-    M <: ClassificationModel[M]]
-  extends Predictor[E, M] with ClassifierParams {
+    FeaturesType,
+    E <: Classifier[FeaturesType, E, M],
+    M <: ClassificationModel[FeaturesType, M]]
+  extends Predictor[FeaturesType, E, M] with ClassifierParams {
 
   /** @group setParam */
   def setRawPredictionCol(value: String): E = set(rawPredictionCol, value).asInstanceOf[E]
@@ -67,11 +69,12 @@ abstract class Classifier[
  * Model produced by a [[Classifier]].
  * Classes are indexed {0, 1, ..., numClasses - 1}.
  *
+ * @tparam FeaturesType  Type of input features.  E.g., [[Vector]]
  * @tparam M  Concrete Model type
  */
 @DeveloperApi
-abstract class ClassificationModel[M <: ClassificationModel[M]]
-  extends PredictionModel[M] with ClassifierParams {
+abstract class ClassificationModel[FeaturesType, M <: ClassificationModel[FeaturesType, M]]
+  extends PredictionModel[FeaturesType, M] with ClassifierParams {
 
   /** @group setParam */
   def setRawPredictionCol(value: String): M = set(rawPredictionCol, value).asInstanceOf[M]
@@ -93,16 +96,20 @@ abstract class ClassificationModel[M <: ClassificationModel[M]]
     // This is a bit complicated since it tries to avoid repeated computation.
     var outputData = dataset
     var numColsOutput = 0
-    if (isDefined(rawPredictionCol)) {
-      val predictRawUDF = udf { (features: Vector) => predictRaw(features) }
+    if (getRawPredictionCol != "") {
+      val predictRawUDF = udf { (features: Any) =>
+        predictRaw(features.asInstanceOf[FeaturesType])
+      }
       outputData = outputData.withColumn(getRawPredictionCol, predictRawUDF(col(getFeaturesCol)))
       numColsOutput += 1
     }
-    if (isDefined(predictionCol)) {
+    if (getPredictionCol != "") {
       val predUDF = if (getRawPredictionCol != "") {
         udf(raw2prediction _).apply(col(getRawPredictionCol))
       } else {
-        val predictUDF = udf { (features: Vector) => predict(features) }
+        val predictUDF = udf { (features: Any) =>
+          predict(features.asInstanceOf[FeaturesType])
+        }
         predictUDF(col(getFeaturesCol))
       }
       outputData = outputData.withColumn(getPredictionCol, predUDF)
@@ -123,7 +130,7 @@ abstract class ClassificationModel[M <: ClassificationModel[M]]
    * This default implementation for classification predicts the index of the maximum value
    * from [[predictRaw()]].
    */
-  override protected def predict(features: Vector): Double = {
+  override protected def predict(features: FeaturesType): Double = {
     raw2prediction(predictRaw(features))
   }
 
@@ -137,7 +144,7 @@ abstract class ClassificationModel[M <: ClassificationModel[M]]
    *          This raw prediction may be any real number, where a larger value indicates greater
    *          confidence for that label.
    */
-  protected def predictRaw(features: Vector): Vector
+  protected def predictRaw(features: FeaturesType): Vector
 
   /**
    * Given a vector of raw predictions, select the predicted label.
