@@ -187,6 +187,53 @@ private[ml] trait HasThresholds extends Params {
 }
 
 /**
+  * Trait for shared param inputCol.
+  */
+private[ml] trait HasInputCol extends Params {
+
+  /**
+   * Param for input column name.
+   * @group param
+   */
+  final val inputCol: InputColParam = new InputColParam(this, "inputCol", "input column name")
+
+  /** @group getParam */
+  final def getInputCol: String = $(inputCol)
+}
+
+/**
+  * Trait for shared param inputCols.
+  */
+private[ml] trait HasInputCols extends Params {
+
+  /**
+   * Param for input column names.
+   * @group param
+   */
+  final val inputCols: InputColsParam = new InputColsParam(this, "inputCols", "input column names")
+
+  /** @group getParam */
+  final def getInputCols: Array[String] = $(inputCols)
+}
+
+/**
+  * Trait for shared param outputCol (default: uid + "__output").
+  */
+private[ml] trait HasOutputCol extends Params {
+
+  /**
+   * Param for output column name.
+   * @group param
+   */
+  final val outputCol: OutputColParam = new OutputColParam(this, "outputCol", "output column name")
+
+  setDefault(outputCol, uid + "__output")
+
+  /** @group getParam */
+  final def getOutputCol: String = $(outputCol)
+}
+
+/**
  * Trait for shared param checkpointInterval.
  */
 private[ml] trait HasCheckpointInterval extends Params {

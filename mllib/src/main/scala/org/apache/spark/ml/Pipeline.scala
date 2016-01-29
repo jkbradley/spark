@@ -44,7 +44,10 @@ abstract class PipelineStage extends Params with Logging {
   private val inputColDataTypes: mutable.Map[Param[_], Seq[AbstractDataType]] =
     mutable.Map.empty[Param[_], Seq[AbstractDataType]]
 
-  /** list of (inputCol param, valid data types). Note some are optional (weightCol), and some depend on fit/transform */
+  /**
+   * Mapping: inputCol name -> valid data types.
+   * Note some are optional (weightCol), and some depend on fit/transform
+   */
   final def getInputCols: Map[String, Seq[AbstractDataType]] = {
     inputColDataTypes.flatMap {
       case (colParam: InputColParam, types: Seq[AbstractDataType]) =>
@@ -54,12 +57,14 @@ abstract class PipelineStage extends Params with Logging {
     }.toMap
   }
 
+  /** Set the valid data types for the given input column */
   protected final def setInputColDataType(
       inputCol: InputColParam,
       dataTypes: Seq[AbstractDataType]): Unit = {
     inputColDataTypes(inputCol) = dataTypes
   }
 
+  /** Set the valid data types for the given input columns */
   protected final def setInputColDataType(
       inputCols: InputColsParam,
       dataTypes: Seq[AbstractDataType]): Unit = {
@@ -70,24 +75,34 @@ abstract class PipelineStage extends Params with Logging {
   private val inputColFitOnly: mutable.Map[Param[_], Boolean] =
     mutable.Map.empty[Param[_], Boolean]
 
+  /** Return true if this input column Param is used during fit() */
   final def useForFit(param: Param[_]): Boolean = inputColFitOnly.get(param) match {
     case Some(fitOnly) => fitOnly
     case None => true
   }
 
+  /** Return true if this input column Param is used during transform() */
   final def useForTransform(param: Param[_]): Boolean = inputColFitOnly.get(param) match {
     case Some(fitOnly) => !fitOnly
     case None => true
   }
 
+  /**
+   * Return true if this input column Param should be used given whether in fit() or transform().
+   * If not specified via [[setUseForFitOnly()]] or [[setUseForTransformOnly()]], then the Param
+   * is assumed to be used during both.
+   * @param fitting  True if in fit().  False if in transform()
+   */
   final def useNow(param: Param[_], fitting: Boolean): Boolean = {
     if (fitting) useForFit(param) else useForTransform(param)
   }
 
+  /** Specify that this input column Param should be used during fit() and not transform(). */
   protected final def setUseForFitOnly(inputCol: InputColParam): Unit = {
     inputColFitOnly(inputCol) = true
   }
 
+  /** Specify that this input column Param should be used during transform() and not fit(). */
   protected final def setUseForTransformOnly(inputCol: InputColParam): Unit = {
     inputColFitOnly(inputCol) = false
   }

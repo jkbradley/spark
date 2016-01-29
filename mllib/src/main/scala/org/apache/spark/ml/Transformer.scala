@@ -108,7 +108,9 @@ abstract class UnaryTransformer[IN, OUT, T <: UnaryTransformer[IN, OUT, T]]
    */
   protected def createTransformFunc: IN => OUT
 
-  /** Returns the data type of the output column. */
+  /**
+   * Returns the data type of the output column.
+   */
   protected def outputDataType: DataType
 
   // Users should call setInputColDataType to check input schema.

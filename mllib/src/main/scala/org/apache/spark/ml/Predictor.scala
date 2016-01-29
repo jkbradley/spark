@@ -26,7 +26,7 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DataTypes, DoubleType, StructType}
+import org.apache.spark.sql.types.{DataType, DataTypes, DoubleType, StructType}
 
 /**
  * (private[ml])  Trait for parameters for prediction (regression and classification).
@@ -79,6 +79,17 @@ abstract class Predictor[
   }
 
   /**
+   * Returns the SQL DataType corresponding to the FeaturesType type parameter.
+   *
+   * NOTE: I hope to get rid of this for Spark 2.0, but that's not related to this prototype.
+   * This is used by schema validation.
+   * This workaround is needed since SQL has different APIs for Scala and Java.
+   *
+   * The default value is VectorUDT, but it may be overridden if FeaturesType is not Vector.
+   */
+  private[ml] def featuresDataType: DataType = new VectorUDT
+
+  /**
    * Extract [[labelCol]] and [[featuresCol]] from the given dataset,
    * and put it in an RDD with strong types.
    */
@@ -115,6 +126,17 @@ abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, 
   @Since("1.6.0")
   def numFeatures: Int = -1
 
+  /**
+   * Returns the SQL DataType corresponding to the FeaturesType type parameter.
+   *
+   * NOTE: I hope to get rid of this for Spark 2.0, but that's not related to this prototype.
+   * This is used by schema validation.
+   * This workaround is needed since SQL has different APIs for Scala and Java.
+   *
+   * The default value is VectorUDT, but it may be overridden if FeaturesType is not Vector.
+   */
+  private[ml] def featuresDataType: DataType = new VectorUDT
+
   override protected def transformSchemaImpl(schema: StructType): StructType = {
     if (isDefined(predictionCol)) {
       SchemaUtils.appendColumn(schema, $(predictionCol), DoubleType)
@@ -131,8 +153,10 @@ abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, 
    * @return transformed dataset with [[predictionCol]] of type [[Double]]
    */
   override protected def transformImpl(dataset: DataFrame): DataFrame = {
-    if (isDefined(predictionCol)) {
-      val predictUDF = udf { (features: Vector) => predict(features) }
+    if ($(predictionCol).nonEmpty) {
+      val predictUDF = udf { (features: Any) =>
+        predict(features.asInstanceOf[FeaturesType])
+      }
       dataset.withColumn($(predictionCol), predictUDF(col($(featuresCol))))
     } else {
       dataset
@@ -143,5 +167,5 @@ abstract class PredictionModel[FeaturesType, M <: PredictionModel[FeaturesType, 
    * Predict label for the given features.
    * This internal method is used to implement [[transform()]] and output [[predictionCol]].
    */
-  protected def predict(features: Vector): Double
+  protected def predict(features: FeaturesType): Double
 }

@@ -24,7 +24,7 @@ final class TestProbabilisticClassificationModel(
     override val uid: String,
     override val numFeatures: Int,
     override val numClasses: Int)
-  extends ProbabilisticClassificationModel[TestProbabilisticClassificationModel] {
+  extends ProbabilisticClassificationModel[Vector, TestProbabilisticClassificationModel] {
 
   override def copy(extra: org.apache.spark.ml.param.ParamMap): this.type = defaultCopy(extra)
 

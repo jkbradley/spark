@@ -132,7 +132,6 @@ class StringIndexerModel (
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
   override protected def transformImpl(dataset: DataFrame): DataFrame = {
-    // TODO: Remove this hack.
     if (!dataset.schema.fieldNames.contains($(inputCol))) {
       logInfo(s"Input column ${$(inputCol)} does not exist during transformation. " +
         "Skip StringIndexerModel.")
@@ -150,12 +149,13 @@ class StringIndexerModel (
     val metadata = NominalAttribute.defaultAttr
       .withName($(inputCol)).withValues(labels).toMetadata()
     // If we are skipping invalid records, filter them out.
-    val filteredDataset = getHandleInvalid match {
-      case "skip" =>
+    val filteredDataset = (getHandleInvalid) match {
+      case "skip" => {
         val filterer = udf { label: String =>
           labelToIndex.contains(label)
         }
         dataset.where(filterer(dataset($(inputCol))))
+      }
       case _ => dataset
     }
     filteredDataset.select(col("*"),
@@ -168,7 +168,6 @@ class StringIndexerModel (
       SchemaUtils.appendColumn(schema, attr.toStructField())
     } else {
       // If the input column does not exist during transformation, we skip StringIndexerModel.
-      // TODO: remove this hack
       schema
     }
   }
@@ -251,7 +250,8 @@ class IndexToString private[ml] (override val uid: String)
    * Optional param for array of labels specifying index-string mapping.
    *
    * Default: Empty array, in which case [[inputCol]] metadata is used for labels.
-   * @group param
+    *
+    * @group param
    */
   final val labels: StringArrayParam = new StringArrayParam(this, "labels",
     "Optional array of labels specifying index-string mapping." +
