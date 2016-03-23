@@ -95,17 +95,7 @@ final class DecisionTreeClassifier @Since("1.4.0") (
   /** @group getParam */
   def getAlgorithm: String = $(algorithm)
 
-  override protected def train(dataset: DataFrame): DecisionTreeClassificationModel =
-    train(dataset, None)
-
-  def fit(
-      dataset: DataFrame,
-      transposedDataset: RDD[(Int, Vector)]): DecisionTreeClassificationModel =
-    train(dataset, Some(transposedDataset))
-
-  private def train(
-      dataset: DataFrame,
-      transposedDataset: Option[RDD[(Int, Vector)]]): DecisionTreeClassificationModel = {
+  override protected def train(dataset: DataFrame): DecisionTreeClassificationModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val numClasses: Int = MetadataUtils.getNumClasses(dataset.schema($(labelCol))) match {
@@ -115,15 +105,16 @@ final class DecisionTreeClassifier @Since("1.4.0") (
         " specified. See StringIndexer.")
         // TODO: Automatically index labels: SPARK-7126
     }
-    val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
     val strategy = getOldStrategy(categoricalFeatures, numClasses)
     val model = getAlgorithm match {
       case "byRow" =>
+        val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
         val trees = RandomForest.run(oldDataset, strategy, numTrees = 1,
           featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
         trees.head
       case "byCol" =>
-        AltDT.train(oldDataset, strategy, colStoreInput = transposedDataset, parentUID = Some(uid))
+        val (columns, labels) = transpose(dataset)
+        AltDT.train(columns, labels, strategy, parentUID = Some(uid))
     }
     model.asInstanceOf[DecisionTreeClassificationModel]
   }

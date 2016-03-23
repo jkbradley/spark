@@ -20,9 +20,7 @@ package org.apache.spark.ml.tree.impl
 import org.apache.spark.Logging
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.ml.tree._
-import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vector
-import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.Strategy
 import org.apache.spark.mllib.tree.impurity.{Entropy, Gini, Impurity, Variance}
 import org.apache.spark.mllib.tree.model.ImpurityStats
@@ -96,22 +94,22 @@ private[ml] object AltDT extends Logging {
    * Method to train a decision tree model over an RDD.
    */
   def train(
-      input: RDD[LabeledPoint],
+      inputColumns: RDD[Vector],
+      inputLabels: RDD[Double],
       strategy: Strategy,
-      colStoreInput: Option[RDD[(Int, Vector)]] = None,
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
     // TODO: Check for empty dataset
-    val numFeatures = input.first().features.size
-    val rootNode = trainImpl(input, strategy, colStoreInput)
+    val numFeatures = inputColumns.count().toInt
+    val rootNode = trainImpl(inputColumns, inputLabels, strategy)
     impl.RandomForest.finalizeTree(rootNode, strategy.algo, strategy.numClasses, numFeatures,
       parentUID)
   }
 
   private[impl] def trainImpl(
-      input: RDD[LabeledPoint],
-      strategy: Strategy,
-      colStoreInput: Option[RDD[(Int, Vector)]]): Node = {
+       inputColumns: RDD[Vector],
+       inputLabels: RDD[Double],
+       strategy: Strategy): Node = {
     val metadata = AltDTMetadata.fromStrategy(strategy)
 
     // The case with 1 node (depth = 0) is handled separately.
@@ -120,8 +118,8 @@ private[ml] object AltDT extends Logging {
     //       other parameters).
     if (strategy.maxDepth == 0) {
       val impurityAggregator: ImpurityAggregatorSingle =
-        input.aggregate(metadata.createImpurityAggregator())(
-          (agg, lp) => agg.update(lp.label, 1.0),
+        inputLabels.aggregate(metadata.createImpurityAggregator())(
+          (agg, label) => agg.update(label, 1.0),
           (agg1, agg2) => agg1.add(agg2))
       val impurityCalculator = impurityAggregator.getCalculator
       return new LeafNode(impurityCalculator.getPredict.predict, impurityCalculator.calculate(),
@@ -132,20 +130,19 @@ private[ml] object AltDT extends Logging {
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
     // TODO: Is this mapping from arrays to iterators to arrays (when constructing learningData)?
     //       Or is the mapping implicit (i.e., not costly)?
-    val colStoreInit: RDD[(Int, Vector)] = colStoreInput.getOrElse(
-      rowToColumnStoreDense(input.map(_.features)))
-    val numRows: Int = colStoreInit.first()._2.size
+    val colStoreInit: RDD[(Vector, Int)] = inputColumns.zipWithIndex().map(x => (x._1, x._2.toInt))
+    val numRows: Int = inputLabels.count().toInt
     val labels = new Array[Double](numRows)
-    input.map(_.label).zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
+    inputLabels.zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
       labels(rowIndex.toInt) = label
     }
-    val labelsBc = input.sparkContext.broadcast(labels)
+    val labelsBc = inputColumns.sparkContext.broadcast(labels)
     // NOTE: Labels are not sorted with features since that would require 1 copy per feature,
     //       rather than 1 copy per worker. This means a lot of random accesses.
     //       We could improve this by applying first-level sorting (by node) to labels.
 
     // Sort each column by feature values.
-    val colStore: RDD[FeatureVector] = colStoreInit.map { case (featureIndex: Int, col: Vector) =>
+    val colStore: RDD[FeatureVector] = colStoreInit.map { case (col: Vector, featureIndex: Int) =>
       val featureArity: Int = strategy.categoricalFeaturesInfo.getOrElse(featureIndex, 0)
       FeatureVector.fromOriginal(featureIndex, featureArity, col)
     }

@@ -21,11 +21,12 @@ import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util.SchemaUtils
-import org.apache.spark.mllib.linalg.{Vector, VectorUDT}
+import org.apache.spark.mllib.linalg.{Vector, VectorUDT, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.expressions.{MutableAggregationBuffer, UserDefinedAggregateFunction}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DataType, DoubleType, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row}
 
 /**
@@ -123,6 +124,87 @@ abstract class Predictor[
   protected def extractLabeledPoints(dataset: DataFrame): RDD[LabeledPoint] = {
     dataset.select($(labelCol), $(featuresCol))
       .map { case Row(label: Double, features: Vector) => LabeledPoint(label, features) }
+  }
+
+  /**
+    * Extract [[labelCol]] and [[featuresCol]] from the given dataset,
+    * and transpose [[featuresCol]] to store data by column, instead of
+    * by row. Returns a 2-tuple of (columns, labels).
+    */
+  protected def transpose(df: DataFrame): (RDD[Vector], RDD[Double]) = {
+    df.sqlContext.setConf("spark.sql.retainGroupColumns", "false")
+
+    // UDF that maps (row, rowIdx) to (colIdx -> (row, rowIdx))
+    val transpose = udf { (features: Vector, rowIndex: Long) =>
+      features.toArray.zipWithIndex.map { case(rowValue, colIndex) =>
+        colIndex -> (rowValue, rowIndex)
+      }
+    }
+
+    val aggUDF = new SortArraysUDAF
+
+    val labels = df.select(col($(labelCol))).map(r => r.getDouble(0))
+
+    val columns = df.withColumn("rowIdx", monotonicallyIncreasingId()) // add rowIdx to sort by row
+      // map to Array[(colIdx, (rowValue, rowIdx))]
+      .select(transpose(col($(featuresCol)), col("rowIdx")).as($(featuresCol)))
+      // flatten to (colIdx, (rowValue, rowIdx))
+      .select(explode(col($(featuresCol))).as($(featuresCol)))
+      // split colIdx and (rowValue, rowIdx) into separate DataFrame columns
+      .select(col(s"${$(featuresCol)}._1").as("colIdx"), col(s"${$(featuresCol)}._2").as("rows"))
+      // group by column index, aggregate (rowValue, rowIdx) into a sorted Array of rowValues
+      .groupBy("colIdx").agg(aggUDF(col("rows")).as($(featuresCol)))
+      // convert from Array to Vector
+      .select(col($(featuresCol))).map { row =>
+        Vectors.dense(row.getSeq[Double](0).toArray)
+      }
+
+    (columns, labels)
+  }
+
+  class SortArraysUDAF extends UserDefinedAggregateFunction {
+    // |-- rows: struct (nullable = true)
+    // |    |-- _1: double (nullable = false)
+    // |    |-- _2: long (nullable = false)
+    def inputSchema: org.apache.spark.sql.types.StructType =
+      StructType(StructField("rows",
+          StructType(
+            StructType(StructField("_1", DoubleType) :: StructField("_2", LongType)
+              :: Nil)
+          )
+        )
+      :: Nil)
+
+    def bufferSchema: StructType = StructType(
+      StructField("values", ArrayType(DoubleType)) ::
+        StructField("rowIndexes", ArrayType(LongType)) :: Nil
+    )
+
+    def dataType: DataType = ArrayType(DoubleType, containsNull = false)
+
+    def deterministic: Boolean = true
+
+    def initialize(buffer: MutableAggregationBuffer): Unit = {
+      buffer(0) = Array[Double]()
+      buffer(1) = Array[Long]()
+    }
+
+    def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
+      val row = input.getStruct(0)
+      buffer(0) = buffer.getSeq[Double](0) ++ Array(row.getDouble(0))
+      buffer(1) = buffer.getSeq[Long](1) ++ Array(row.getLong(1))
+    }
+
+    def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
+      buffer1(0) = buffer1.getSeq[Double](0) ++ buffer2.getSeq[Double](0)
+      buffer1(1) = buffer1.getSeq[Long](1) ++ buffer2.getSeq[Long](1)
+    }
+
+    def evaluate(buffer: Row): Any = {
+      val arr = buffer.getSeq[Double](0)
+      val rowIndexes = buffer.getSeq[Long](1)
+      arr.zip(rowIndexes).sortBy(_._2).unzip._1
+    }
   }
 }
 
