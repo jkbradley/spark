@@ -130,17 +130,17 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   test("FeatureVectorSortByValue") {
     val values = Array(0.1, 0.2, 0.4, 0.6, 0.7, 0.9, 1.5, 1.55)
     val col = Random.shuffle(values.toIterator).toArray
-    val (_, unsortedIndices) = col.zipWithIndex.unzip
+    val unsortedIndices = col.indices
     val sortedIndices = unsortedIndices.sortBy(x => col(x)).toArray
     val fvUnsorted = Vectors.dense(col)
     val featureIndex = 3
-    val featureArity = 5
+    val featureArity = 0
     val fvSorted =
       FeatureVector.fromOriginal(featureIndex, featureArity, fvUnsorted)
-    assert(fvSorted.featureIndex == featureIndex)
-    assert(fvSorted.featureArity == featureArity)
-    assert(fvSorted.values.deep == values.deep)
-    assert(fvSorted.indices.deep == sortedIndices.deep)
+    assert(fvSorted.featureIndex === featureIndex)
+    assert(fvSorted.featureArity === featureArity)
+    assert(fvSorted.values.deep === values.deep)
+    assert(fvSorted.indices.deep === sortedIndices.deep)
   }
 
   test("PartitionInfo") {

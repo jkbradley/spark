@@ -905,7 +905,7 @@ private[ml] object AltDT extends Logging {
     }
   }
 
-  /**
+   /**
     * Feature vector types are based on (feature type, representation).
     * The feature type can be continuous or categorical.
     *
