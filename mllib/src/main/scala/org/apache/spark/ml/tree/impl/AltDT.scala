@@ -28,7 +28,7 @@ import org.apache.spark.mllib.tree.impurity.{Entropy, Gini, Impurity, Variance}
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.util.collection.BitSet
+import org.apache.spark.util.collection.{BitSet, SortDataFormat, Sorter}
 import org.roaringbitmap.RoaringBitmap
 
 
@@ -238,16 +238,13 @@ private[ml] object AltDT extends Logging {
    *  - On each partition, for each feature on the partition, select the best split for each node.
    *    Each worker returns: For each active node, best split + info gain
    *  - The splits across workers are aggregated to the driver.
-   * @param partitionInfos
-   * @param labelsBc
-   * @param metadata
    * @return  Array over active nodes of (best split, impurity stats for split),
    *          where the split is None if no useful split exists
    */
   private[impl] def computeBestSplits(
       partitionInfos: RDD[PartitionInfo],
       labelsBc: Broadcast[Array[Double]],
-      metadata: AltDTMetadata): Array[(Option[Split], ImpurityStats)] = {
+      metadata: AltDTMetadata) = {
     // On each partition, for each feature on the partition, select the best split for each node.
     // This will use:
     //  - groupedColStore (the features)
@@ -384,10 +381,6 @@ private[ml] object AltDT extends Logging {
    * TODO: Return null or None when the split is invalid, such as putting all instances on one
    *       child node.
    *
-   * @param col
-   * @param labels
-   * @param fromOffset
-   * @param toOffset
    * @return  (best split, statistics for split)  If the best split actually puts all instances
    *          in one leaf node, then it will be set to None.
    */
@@ -730,61 +723,6 @@ private[ml] object AltDT extends Logging {
   }
 
   /**
-   * Feature vector types are based on (feature type, representation).
-   * The feature type can be continuous or categorical.
-   *
-   * Features are sorted by value, so we must store indices + values.
-   * These values are currently stored in a dense representation only.
-   * TODO: Support sparse storage (to optimize deeper levels of the tree), and maybe compressed
-   *       storage (to optimize upper levels of the tree).
-   * @param featureArity  For categorical features, this gives the number of categories.
-   *                      For continuous features, this should be set to 0.
-   */
-  private[impl] class FeatureVector(
-      val featureIndex: Int,
-      val featureArity: Int,
-      val values: Array[Double],
-      val indices: Array[Int])
-    extends Serializable {
-
-    def isCategorical: Boolean = featureArity > 0
-
-    /** For debugging */
-    override def toString: String = {
-      "  FeatureVector(" +
-        s"    featureIndex: $featureIndex,\n" +
-        s"    featureType: ${if (featureArity == 0) "Continuous" else "Categorical"},\n" +
-        s"    featureArity: $featureArity,\n" +
-        s"    values: ${values.mkString(", ")},\n" +
-        s"    indices: ${indices.mkString(", ")},\n" +
-        "  )"
-    }
-
-    def deepCopy(): FeatureVector =
-      new FeatureVector(featureIndex, featureArity, values.clone(), indices.clone())
-
-    override def equals(other: Any): Boolean = {
-      other match {
-        case o: FeatureVector =>
-          featureIndex == o.featureIndex && featureArity == o.featureArity &&
-            values.sameElements(o.values) && indices.sameElements(o.indices)
-        case _ => false
-      }
-    }
-  }
-
-  private[impl] object FeatureVector {
-    /** Store column sorted by feature values. */
-    def fromOriginal(
-        featureIndex: Int,
-        featureArity: Int,
-        featureVector: Vector): FeatureVector = {
-      val (values, indices) = featureVector.toArray.zipWithIndex.sorted.unzip
-      new FeatureVector(featureIndex, featureArity, values.toArray, indices.toArray)
-    }
-  }
-
-  /**
    * For a given feature, for a given node, apply a split and return a bit vector indicating the
    * outcome of the split for each instance at that node.
    *
@@ -964,6 +902,144 @@ private[ml] object AltDT extends Logging {
         i += 1
       }
       PartitionInfo(newColumns, newNodeOffsets.flatten, newActiveNodes)
+    }
+  }
+
+   /**
+    * Feature vector types are based on (feature type, representation).
+    * The feature type can be continuous or categorical.
+    *
+    * Features are sorted by value, so we must store indices + values.
+    * These values are currently stored in a dense representation only.
+    * TODO: Support sparse storage (to optimize deeper levels of the tree), and maybe compressed
+    *       storage (to optimize upper levels of the tree).
+    * @param featureArity  For categorical features, this gives the number of categories.
+    *                      For continuous features, this should be set to 0.
+    */
+  private[impl] class FeatureVector(
+                                     val featureIndex: Int,
+                                     val featureArity: Int,
+                                     val values: Array[Double],
+                                     val indices: Array[Int])
+    extends Serializable {
+
+    def isCategorical: Boolean = featureArity > 0
+
+    /** For debugging */
+    override def toString: String = {
+      "  FeatureVector(" +
+        s"    featureIndex: $featureIndex,\n" +
+        s"    featureType: ${if (featureArity == 0) "Continuous" else "Categorical"},\n" +
+        s"    featureArity: $featureArity,\n" +
+        s"    values: ${values.mkString(", ")},\n" +
+        s"    indices: ${indices.mkString(", ")},\n" +
+        "  )"
+    }
+
+    def deepCopy(): FeatureVector =
+      new FeatureVector(featureIndex, featureArity, values.clone(), indices.clone())
+
+    override def equals(other: Any): Boolean = {
+      other match {
+        case o: FeatureVector =>
+          featureIndex == o.featureIndex && featureArity == o.featureArity &&
+            values.sameElements(o.values) && indices.sameElements(o.indices)
+        case _ => false
+      }
+    }
+  }
+
+  private[impl] object FeatureVector {
+    /** Store column sorted by feature values. */
+    def fromOriginal(
+                      featureIndex: Int,
+                      featureArity: Int,
+                      featureVector: Vector): FeatureVector = {
+      val values = featureVector.toArray
+      val indices = values.indices.toArray
+      val fv = new FeatureVector(featureIndex, featureArity, values, indices)
+      val sorter = new Sorter(new FeatureVectorSortByValue(featureIndex, featureArity))
+      sorter.sort(fv, 0, values.length, Ordering[KeyWrapper[Double]])
+      fv
+    }
+  }
+
+  /**
+    * Sort FeatureVector by values column; @see [[FeatureVector.fromOriginal()]]
+    * @param featureIndex @param featureArity Passed in so that, if a new
+    *                     FeatureVector is allocated during sorting, that new object
+    *                     also has the same featureIndex and featureArity
+    */
+  private class FeatureVectorSortByValue(featureIndex: Int, featureArity: Int)(implicit ord: Ordering[Double])
+    extends SortDataFormat[KeyWrapper[Double], FeatureVector] {
+
+    override def newKey(): KeyWrapper[Double] = new KeyWrapper()
+
+    override def getKey(data: FeatureVector,
+                        pos: Int,
+                        reuse: KeyWrapper[Double]): KeyWrapper[Double] = {
+      if (reuse == null) {
+        new KeyWrapper().setKey(data.values(pos))
+      } else {
+        reuse.setKey(data.values(pos))
+      }
+    }
+
+    override def getKey(data: FeatureVector,
+                        pos: Int): KeyWrapper[Double] = {
+      getKey(data, pos, null)
+    }
+
+    private def swapElements[T](data: Array[T],
+                                pos0: Int,
+                                pos1: Int): Unit = {
+      val tmp = data(pos0)
+      data(pos0) = data(pos1)
+      data(pos1) = tmp
+    }
+
+    override def swap(data: FeatureVector, pos0: Int, pos1: Int): Unit = {
+      swapElements(data.values, pos0, pos1)
+      swapElements(data.indices, pos0, pos1)
+    }
+
+    override def copyRange(src: FeatureVector,
+                           srcPos: Int,
+                           dst: FeatureVector,
+                           dstPos: Int,
+                           length: Int): Unit = {
+      System.arraycopy(src.values, srcPos, dst.values, dstPos, length)
+      System.arraycopy(src.indices, srcPos, dst.indices, dstPos, length)
+    }
+
+    override def allocate(length: Int): FeatureVector = {
+      new FeatureVector(featureIndex, featureArity, new Array[Double](length), new Array[Int](length))
+    }
+
+    override def copyElement(src: FeatureVector,
+                             srcPos: Int,
+                             dst: FeatureVector,
+                             dstPos: Int): Unit = {
+      dst.values(dstPos) = src.values(srcPos)
+      dst.indices(dstPos) = src.indices(srcPos)
+    }
+  }
+
+  /**
+    * A wrapper that holds a primitive key – borrowed from [[org.apache.spark.ml.recommendation.ALS.KeyWrapper]]
+    */
+  private class KeyWrapper[Double](implicit ord: Ordering[Double])
+    extends Ordered[KeyWrapper[Double]] {
+
+    var key: Double = _
+
+    override def compare(that: KeyWrapper[Double]): Int = {
+      ord.compare(key, that.key)
+    }
+
+    def setKey(key: Double): this.type = {
+      this.key = key
+      this
     }
   }
 }
