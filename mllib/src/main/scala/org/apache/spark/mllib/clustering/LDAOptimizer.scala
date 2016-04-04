@@ -434,9 +434,14 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
     val alpha = this.alpha.toBreeze
     val gammaShape = this.gammaShape
 
+    // RDD over partition batches, with each containing
+    // (posterior over per-word topic assignments of size K x vocabSize,
+    //  list over docs in partition of contribution towards distribution q(theta|gamma)
+    //  over K topics)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
 
+      // stat: posterior over per-word topic assignments, for this batch of docs
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
@@ -536,6 +541,11 @@ private[clustering] object OnlineLDAOptimizer {
    * An optimization (Lee, Seung: Algorithms for non-negative matrix factorization, NIPS 2001)
    * avoids explicit computation of variational parameter `phi`.
    * @see [[http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.31.7566]]
+   *
+   * @return  (variational distribution q(theta|gamma) over K topics,
+   *           posterior over per-word topic assignments of size K x ids),
+   *          where "ids" is the set of non-zeros in the given termCounts vector.
+   *          Each of these are of course for this single doc.
    */
   private[clustering] def variationalTopicInference(
       termCounts: Vector,
