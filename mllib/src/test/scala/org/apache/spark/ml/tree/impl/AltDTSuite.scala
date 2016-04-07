@@ -94,6 +94,25 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(model.numNodes === 5)
   }
 
+  test("example providing transposed dataset") {
+    val data = Range(0, 8).map(x => LabeledPoint(x, Vectors.dense(x)))
+    val df = sqlContext.createDataFrame(data)
+    val dt = new DecisionTreeRegressor()
+      .setFeaturesCol("features")
+      .setLabelCol("label")
+      .setMaxDepth(10)
+      .setAlgorithm("byCol")
+    val (columns, labels) = dt.transposeDataset(df)
+    val model = dt.fit(df, columns, labels)
+    assert(model.rootNode.isInstanceOf[InternalNode])
+    val root = model.rootNode.asInstanceOf[InternalNode]
+    assert(root.leftChild.isInstanceOf[InternalNode] && root.rightChild.isInstanceOf[InternalNode])
+    val left = root.leftChild.asInstanceOf[InternalNode]
+    val right = root.rightChild.asInstanceOf[InternalNode]
+    val grandkids = Array(left.leftChild, left.rightChild, right.leftChild, right.rightChild)
+    assert(grandkids.forall(_.isInstanceOf[InternalNode]))
+  }
+
   /* * * * * * * * * * * Helper classes * * * * * * * * * * */
 
   test("FeatureVector") {

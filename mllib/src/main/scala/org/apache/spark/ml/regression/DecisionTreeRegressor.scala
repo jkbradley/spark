@@ -92,7 +92,22 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
   /** @group getParam */
   def getAlgorithm: String = $(algorithm)
 
-  override protected def train(dataset: DataFrame): DecisionTreeRegressionModel = {
+  override protected def train(dataset: DataFrame): DecisionTreeRegressionModel =
+    train(dataset, None)
+
+  def fit(
+      dataset: DataFrame,
+      columns: RDD[Vector],
+      labels:  RDD[Double]): DecisionTreeRegressionModel =
+    train(dataset, Some((columns, labels)))
+
+  def transposeDataset(dataset: DataFrame): (RDD[Vector], RDD[Double]) = {
+    transpose(dataset)
+  }
+
+  private def train(
+      dataset: DataFrame,
+      transposedDataset: Option[(RDD[Vector], RDD[Double])]): DecisionTreeRegressionModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val strategy = getOldStrategy(categoricalFeatures)
@@ -103,7 +118,7 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
           featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
         trees.head
       case "byCol" =>
-        val (columns, labels) = transpose(dataset)
+        val (columns, labels) = transposedDataset.getOrElse(transpose(dataset))
         AltDT.train(columns, labels, strategy, parentUID = Some(uid))
     }
     model.asInstanceOf[DecisionTreeRegressionModel]

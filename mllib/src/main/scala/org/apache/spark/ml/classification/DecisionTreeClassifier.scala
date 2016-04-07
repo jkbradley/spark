@@ -95,7 +95,22 @@ final class DecisionTreeClassifier @Since("1.4.0") (
   /** @group getParam */
   def getAlgorithm: String = $(algorithm)
 
-  override protected def train(dataset: DataFrame): DecisionTreeClassificationModel = {
+  override protected def train(dataset: DataFrame): DecisionTreeClassificationModel =
+    train(dataset, None)
+
+  def fit(
+      dataset: DataFrame,
+      columns: RDD[Vector],
+      labels:  RDD[Double]): DecisionTreeClassificationModel =
+    train(dataset, Some((columns, labels)))
+
+  def transposeDataset(dataset: DataFrame): (RDD[Vector], RDD[Double]) = {
+    transpose(dataset)
+  }
+
+  private def train(
+      dataset: DataFrame,
+      transposedDataset: Option[(RDD[Vector], RDD[Double])]): DecisionTreeClassificationModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val numClasses: Int = MetadataUtils.getNumClasses(dataset.schema($(labelCol))) match {
@@ -113,7 +128,7 @@ final class DecisionTreeClassifier @Since("1.4.0") (
           featureSubsetStrategy = "all", seed = $(seed), parentUID = Some(uid))
         trees.head
       case "byCol" =>
-        val (columns, labels) = transpose(dataset)
+        val (columns, labels) = transposedDataset.getOrElse(transpose(dataset))
         AltDT.train(columns, labels, strategy, parentUID = Some(uid))
     }
     model.asInstanceOf[DecisionTreeClassificationModel]
