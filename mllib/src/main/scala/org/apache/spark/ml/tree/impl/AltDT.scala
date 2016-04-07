@@ -94,8 +94,8 @@ private[ml] object AltDT extends Logging {
    * Method to train a decision tree model over an RDD.
    */
   def train(
-      inputColumns: RDD[Vector],
-      inputLabels: RDD[Double],
+      inputColumns: RDD[(Int, Vector)],
+      inputLabels: Array[Double],
       strategy: Strategy,
       parentUID: Option[String] = None): DecisionTreeModel = {
     // TODO: Check validity of params
@@ -107,8 +107,8 @@ private[ml] object AltDT extends Logging {
   }
 
   private[impl] def trainImpl(
-       inputColumns: RDD[Vector],
-       inputLabels: RDD[Double],
+       inputColumns: RDD[(Int, Vector)],
+       inputLabels: Array[Double],
        strategy: Strategy): Node = {
     val metadata = AltDTMetadata.fromStrategy(strategy)
 
@@ -130,19 +130,14 @@ private[ml] object AltDT extends Logging {
     //   Note: rowToColumnStoreDense checks to make sure numRows < Int.MaxValue.
     // TODO: Is this mapping from arrays to iterators to arrays (when constructing learningData)?
     //       Or is the mapping implicit (i.e., not costly)?
-    val colStoreInit: RDD[(Vector, Int)] = inputColumns.zipWithIndex().map(x => (x._1, x._2.toInt))
-    val numRows: Int = inputLabels.count().toInt
-    val labels = new Array[Double](numRows)
-    inputLabels.zipWithIndex().collect().foreach { case (label: Double, rowIndex: Long) =>
-      labels(rowIndex.toInt) = label
-    }
-    val labelsBc = inputColumns.sparkContext.broadcast(labels)
+    val numRows: Int = inputLabels.length
+    val labelsBc = inputColumns.sparkContext.broadcast(inputLabels)
     // NOTE: Labels are not sorted with features since that would require 1 copy per feature,
     //       rather than 1 copy per worker. This means a lot of random accesses.
     //       We could improve this by applying first-level sorting (by node) to labels.
 
     // Sort each column by feature values.
-    val colStore: RDD[FeatureVector] = colStoreInit.map { case (col: Vector, featureIndex: Int) =>
+    val colStore: RDD[FeatureVector] = inputColumns.map { case (featureIndex, col) =>
       val featureArity: Int = strategy.categoricalFeaturesInfo.getOrElse(featureIndex, 0)
       FeatureVector.fromOriginal(featureIndex, featureArity, col)
     }

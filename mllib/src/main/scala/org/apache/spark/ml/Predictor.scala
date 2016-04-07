@@ -131,8 +131,7 @@ abstract class Predictor[
     * and transpose [[featuresCol]] to store data by column, instead of
     * by row. Returns a 2-tuple of (columns, labels).
     */
-  protected def transpose(df: DataFrame): (RDD[Vector], RDD[Double]) = {
-    df.sqlContext.setConf("spark.sql.retainGroupColumns", "false")
+  protected def transpose(df: DataFrame): (RDD[(Int, Vector)], Array[Double]) = {
 
     // UDF that maps (row, rowIdx) to (colIdx -> (row, rowIdx))
     val transpose = udf { (features: Vector, rowIndex: Long) =>
@@ -143,9 +142,15 @@ abstract class Predictor[
 
     val aggUDF = new SortArraysUDAF
 
-    val labels = df.select(col($(labelCol))).map(r => r.getDouble(0))
+    val dfWithIndex = df.withColumn("rowIdx", monotonicallyIncreasingId()) // add rowIdx to sort by row
 
-    val columns = df.withColumn("rowIdx", monotonicallyIncreasingId()) // add rowIdx to sort by row
+    // collect labels, sorted by monotonicallyIncreasingId
+    val labels = dfWithIndex.select(col("rowIdx"), col($(labelCol))).map(r => r.getLong(0) -> r.getDouble(1))
+      .sortByKey()
+      .values
+      .collect()
+
+    val columns = dfWithIndex
       // map to Array[(colIdx, (rowValue, rowIdx))]
       .select(transpose(col($(featuresCol)), col("rowIdx")).as($(featuresCol)))
       // flatten to (colIdx, (rowValue, rowIdx))
@@ -155,8 +160,8 @@ abstract class Predictor[
       // group by column index, aggregate (rowValue, rowIdx) into a sorted Array of rowValues
       .groupBy("colIdx").agg(aggUDF(col("rows")).as($(featuresCol)))
       // convert from Array to Vector
-      .select(col($(featuresCol))).map { row =>
-        Vectors.dense(row.getSeq[Double](0).toArray)
+      .map { row =>
+        row.getInt(0) -> Vectors.dense(row.getSeq[Double](1).toArray)
       }
 
     (columns, labels)
@@ -185,7 +190,7 @@ abstract class Predictor[
     def deterministic: Boolean = true
 
     def initialize(buffer: MutableAggregationBuffer): Unit = {
-      buffer(0) = Array[Double]()
+     buffer(0) = Array[Double]()
       buffer(1) = Array[Long]()
     }
 
