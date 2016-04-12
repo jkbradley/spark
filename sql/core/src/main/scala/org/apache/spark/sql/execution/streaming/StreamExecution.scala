@@ -79,6 +79,7 @@ class StreamExecution(
 
   private val triggerExecutor = trigger match {
     case t: ProcessingTime => ProcessingTimeExecutor(t)
+    case t: MLAlgorithmTrigger => t
   }
 
   /** Defines the internal state of execution */

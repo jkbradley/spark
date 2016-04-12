@@ -17,8 +17,10 @@
 
 package org.apache.spark.sql.execution.streaming
 
+import java.util.concurrent.CountDownLatch
+
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.ProcessingTime
+import org.apache.spark.sql.{Trigger, ProcessingTime}
 import org.apache.spark.util.{Clock, SystemClock}
 
 trait TriggerExecutor {

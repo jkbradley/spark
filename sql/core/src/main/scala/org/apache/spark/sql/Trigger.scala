@@ -17,13 +17,15 @@
 
 package org.apache.spark.sql
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 import scala.concurrent.duration.Duration
 
 import org.apache.commons.lang3.StringUtils
 
 import org.apache.spark.annotation.Experimental
+import org.apache.spark.sql.execution.streaming.TriggerExecutor
 import org.apache.spark.unsafe.types.CalendarInterval
 
 /**
@@ -130,4 +132,35 @@ object ProcessingTime {
   def create(interval: Long, unit: TimeUnit): ProcessingTime = {
     new ProcessingTime(unit.toMillis(interval))
   }
+}
+
+case class MLAlgorithmTrigger(numIter: Int) extends TriggerExecutor with Trigger {
+
+  private var latch: CountDownLatch = _
+  private val iters = new AtomicInteger()
+
+  def resetLatch(): Unit = {
+    latch = new CountDownLatch(numIter)
+  }
+
+  def acknowledge(): Unit = {
+    latch.countDown()
+    iters.incrementAndGet()
+  }
+
+  def await(): Unit = {
+    latch.await()
+  }
+
+  override def execute(batchRunner: () => Boolean): Unit = {
+    while (true) {
+      val terminated = !batchRunner()
+      if (terminated) {
+        return
+      }
+      latch.await()
+    }
+  }
+
+  def totalIters: Int = iters.get()
 }
