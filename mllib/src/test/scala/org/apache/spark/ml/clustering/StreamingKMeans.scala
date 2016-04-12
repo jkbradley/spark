@@ -54,6 +54,7 @@ class StreamingKMeans extends StreamTest with SharedSQLContext with Eventually {
     }
 
     val toVector = udf { (x: Int) => Vectors.dense(x.toDouble) }
+    assert(inputDf.isStreaming)
     kmeans.fit(inputDf.select(toVector(col("point")).as("features")))
 
     println("final centers")
