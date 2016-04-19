@@ -31,6 +31,8 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.collection.{BitSet, SortDataFormat, Sorter}
 import org.roaringbitmap.RoaringBitmap
 
+import scala.collection.mutable
+
 
 /**
  * DecisionTree which partitions data by feature.
@@ -55,6 +57,34 @@ private[ml] object AltDT extends Logging {
       val maxBins: Int,
       val minInfoGain: Double,
       val impurity: Impurity) extends Serializable {
+
+    private val unorderedSplits = mutable.Map.empty[Int, Array[CategoricalSplit]]
+
+    /**
+     * Returns all possible subsets of features for categorical splits.
+     */
+    private def findSplits(
+                            featureIndex: Int,
+                            featureArity: Int): Array[CategoricalSplit] = {
+      // Unordered features
+      // 2^(featureArity - 1) - 1 combinations
+      val numSplits = (1 << (featureArity - 1)) - 1
+      val splits = new Array[CategoricalSplit](numSplits)
+
+      var splitIndex = 0
+      while (splitIndex < numSplits) {
+        val categories: List[Double] =
+          RandomForest.extractMultiClassCategories(splitIndex + 1, featureArity)
+        splits(splitIndex) =
+          new CategoricalSplit(featureIndex, categories.toArray, featureArity)
+        splitIndex += 1
+      }
+      splits
+    }
+
+    def getUnorderedSplits(featureIndex: Int, featureArity: Int): Array[CategoricalSplit] = {
+      unorderedSplits.getOrElseUpdate(featureIndex, findSplits(featureIndex, featureArity))
+    }
 
     private val maxCategoriesForUnorderedFeature =
       ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
@@ -390,18 +420,17 @@ private[ml] object AltDT extends Logging {
       fromOffset: Int,
       toOffset: Int,
       metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
-    val valuesForNode = col.values.view.slice(fromOffset, toOffset)
-    val labelsForNode = col.indices.view.slice(fromOffset, toOffset).map(labels.apply)
     if (col.isCategorical) {
       if (metadata.isUnorderedFeature(col.featureArity)) {
-        chooseUnorderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, metadata,
-          col.featureArity)
+        val splits: Array[CategoricalSplit] = metadata.getUnorderedSplits(col.featureIndex, col.featureArity)
+        chooseUnorderedCategoricalSplit(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset,
+          metadata, col.featureArity, splits)
       } else {
-        chooseOrderedCategoricalSplit(col.featureIndex, valuesForNode, labelsForNode, metadata,
-          col.featureArity)
+        chooseOrderedCategoricalSplit(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset,
+          metadata, col.featureArity)
       }
     } else {
-      chooseContinuousSplit(col.featureIndex, valuesForNode, labelsForNode, metadata)
+      chooseContinuousSplit(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset, metadata)
     }
   }
 
@@ -424,8 +453,11 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def chooseOrderedCategoricalSplit(
       featureIndex: Int,
-      values: Seq[Double],
-      labels: Seq[Double],
+      values: Array[Double],
+      indices: Array[Int],
+      labels: Array[Double],
+      from: Int,
+      to: Int,
       metadata: AltDTMetadata,
       featureArity: Int): (Option[Split], ImpurityStats) = {
     // TODO: Support high-arity features by using a single array to hold the stats.
@@ -434,10 +466,10 @@ private[ml] object AltDT extends Logging {
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
     var i = 0
-    val len = values.length
+    val len = to - from
     while (i < len) {
-      val cat = values(i)
-      val label = labels(i)
+      val cat = values(from + i)
+      val label = labels(indices(from + i))
       aggStats(cat.toInt).update(label)
       i += 1
     }
@@ -523,7 +555,7 @@ private[ml] object AltDT extends Logging {
       val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
       if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
         bestSplitIndex = sortedCatIndex
-        leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+        System.arraycopy(leftImpurityAgg.stats, 0, bestLeftImpurityAgg.stats, 0, leftImpurityAgg.stats.length)
         bestGain = gain
       }
       sortedCatIndex += 1
@@ -560,17 +592,26 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def chooseUnorderedCategoricalSplit(
       featureIndex: Int,
-      values: Seq[Double],
-      labels: Seq[Double],
+      values: Array[Double],
+      indices: Array[Int],
+      labels: Array[Double],
+      from: Int,
+      to: Int,
       metadata: AltDTMetadata,
-      featureArity: Int): (Option[Split], ImpurityStats) = {
+      featureArity: Int,
+      splits: Array[CategoricalSplit]): (Option[Split], ImpurityStats) = {
 
     // Label stats for each category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    values.zip(labels).foreach { case (cat, label) =>
+    val length = to - from
+    var i = 0
+    while (i < length) {
+      val cat = values(from + i)
+      val label = labels(indices(from + i))
       // NOTE: we assume the values for categorical features are Ints in [0,featureArity)
       aggStats(cat.toInt).update(label)
+      i += 1
     }
 
     // Aggregated statistics for left part of split and entire split.
@@ -591,11 +632,10 @@ private[ml] object AltDT extends Logging {
       //  only requires addition/removal of a single category and a single add/subtract to
       //  leftCount and rightCount.
       //  TODO: Use more efficient encoding such as gray codes
-      val splits: Array[CategoricalSplit] = findSplits(featureIndex, featureArity, metadata)
       var bestSplit: Option[CategoricalSplit] = None
       val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
       var bestGain: Double = -1.0
-      val fullCount: Double = values.size
+      val fullCount: Double = length
       for (split <- splits) {
         // Update left, right impurity stats
         split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
@@ -610,7 +650,7 @@ private[ml] object AltDT extends Logging {
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestSplit = Some(split)
-          leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+          System.arraycopy(leftImpurityAgg.stats, 0, bestLeftImpurityAgg.stats, 0, leftImpurityAgg.stats.length)
           bestGain = gain
         }
         // Reset left impurity stats
@@ -632,29 +672,6 @@ private[ml] object AltDT extends Logging {
   }
 
   /**
-   * Returns all possible subsets of features for categorical splits.
-   */
-  private def findSplits(
-      featureIndex: Int,
-      featureArity: Int,
-      metadata: AltDTMetadata): Array[CategoricalSplit] = {
-    // Unordered features
-    // 2^(featureArity - 1) - 1 combinations
-    val numSplits = (1 << (featureArity - 1)) - 1
-    val splits = new Array[CategoricalSplit](numSplits)
-
-    var splitIndex = 0
-    while (splitIndex < numSplits) {
-      val categories: List[Double] =
-        RandomForest.extractMultiClassCategories(splitIndex + 1, featureArity)
-      splits(splitIndex) =
-        new CategoricalSplit(featureIndex, categories.toArray, featureArity)
-      splitIndex += 1
-    }
-    splits
-  }
-
-  /**
    * Choose splitting rule: feature value <= threshold
    * @return  (best split, statistics for split)  If the best split actually puts all instances
    *          in one leaf node, then it will be set to None.  The impurity stats maybe still be
@@ -662,16 +679,19 @@ private[ml] object AltDT extends Logging {
    */
   private[impl] def chooseContinuousSplit(
       featureIndex: Int,
-      values: Seq[Double],
-      labels: Seq[Double],
+      values: Array[Double],
+      indices: Array[Int],
+      labels: Array[Double],
+      from: Int,
+      to: Int,
       metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
     var i = 0
-    val len = labels.length
-    while (i < len) {
-      rightImpurityAgg.update(labels(i), 1.0)
+    val length = to - from
+    while (i < length) {
+      rightImpurityAgg.update(labels(indices(from + i)), 1.0)  // can we pass each label once with a weight equal to count?
       i += 1
     }
 
@@ -684,10 +704,9 @@ private[ml] object AltDT extends Logging {
     val fullCount: Double = rightCount
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
     var j = 0
-    val length = values.length
     while (j < length) {
-      val value = values(j)
-      val label = labels(j)
+      val value = values(from + j)
+      val label = labels(indices(from + j))
       if (value != currentThreshold) {
         // Check gain
         val leftWeight = leftCount / fullCount
@@ -697,7 +716,7 @@ private[ml] object AltDT extends Logging {
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestThreshold = currentThreshold
-          leftImpurityAgg.stats.copyToArray(bestLeftImpurityAgg.stats)
+          System.arraycopy(leftImpurityAgg.stats, 0, bestLeftImpurityAgg.stats, 0, leftImpurityAgg.stats.length)
           bestGain = gain
         }
         currentThreshold = value
@@ -825,17 +844,32 @@ private[ml] object AltDT extends Logging {
 
       val newColumns = columns.map { col =>
         activeNodes.iterator.foreach { nodeIdx =>
+          // WHAT TO OPTIMIZE:
+          // - no views, just use array offsets
+          // - try skipping numBitsSet
+          // - maybe uncompress bitmap
           val from = nodeOffsets(nodeIdx)
           val to = nodeOffsets(nodeIdx + 1)
-          val rangeIndices = col.indices.view.slice(from, to)
-          val rangeValues = col.values.view.slice(from, to)
 
           // If this is the very first time we split,
           // we don't use rangeIndices to count the number of bits set;
           // the entire bit vector will be used, so getCardinality
           // will give us the same result more cheaply.
-          val numBitsSet = if (nodeOffsets.length == 2) instanceBitVector.getCardinality
-                           else rangeIndices.count(instanceBitVector.contains)
+          val numBitsSet = {
+            if (nodeOffsets.length == 2) instanceBitVector.getCardinality
+            else {
+              var i = 0
+              var count = 0
+              val len = to - from
+              while (i < len) {
+                if (instanceBitVector.contains(col.indices(from + i))) {
+                  count += 1
+                }
+                i += 1
+              }
+              count
+            }
+          }
 
           val numBitsNotSet = to - from - numBitsSet // number of instances splitting left
           val oldOffset = newNodeOffsets(nodeIdx).head
@@ -861,15 +895,16 @@ private[ml] object AltDT extends Logging {
             // 2) in the [numBitsNotSet, to) range if the bit is true.
             var (leftInstanceIdx, rightInstanceIdx) = (from, from + numBitsNotSet)
             var idx = 0
-            while (idx < rangeValues.length) {
-              val indexForVal = rangeIndices(idx)
+            val length = to - from
+            while (idx < length) {
+              val indexForVal = col.indices(from + idx)
               val bit = instanceBitVector.contains(indexForVal)
               if (bit) {
-                tempVals(rightInstanceIdx) = rangeValues(idx)
+                tempVals(rightInstanceIdx) = col.values(from + idx)
                 tempIndices(rightInstanceIdx) = indexForVal
                 rightInstanceIdx += 1
               } else {
-                tempVals(leftInstanceIdx) = rangeValues(idx)
+                tempVals(leftInstanceIdx) = col.values(from + idx)
                 tempIndices(leftInstanceIdx) = indexForVal
                 leftInstanceIdx += 1
               }
@@ -879,8 +914,8 @@ private[ml] object AltDT extends Logging {
 
             // update the column values and indices
             // with the corresponding indices
-            Array.copy(tempVals, from, col.values, from, rangeValues.length)
-            Array.copy(tempIndices, from, col.indices, from, rangeValues.length)
+            System.arraycopy(tempVals, from, col.values, from, length)
+            System.arraycopy(tempIndices, from, col.indices, from, length)
           }
         }
         col
