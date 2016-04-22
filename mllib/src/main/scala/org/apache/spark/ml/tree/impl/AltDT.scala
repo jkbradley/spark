@@ -30,6 +30,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.collection.{BitSet, SortDataFormat, Sorter}
 import org.roaringbitmap.RoaringBitmap
+import org.apache.spark.mllib.tree.impl.DecisionTreeMetadata
 
 import scala.collection.mutable
 
@@ -56,12 +57,36 @@ private[ml] object AltDT extends Logging {
       val numClasses: Int,
       val maxBins: Int,
       val minInfoGain: Double,
-      val impurity: Impurity) extends Serializable {
+      val impurity: Impurity,
+      val categoricalFeaturesInfo: Map[Int, Int]) extends Serializable {
 
-    private val unorderedSplits = mutable.Map.empty[Int, Array[CategoricalSplit]]
+    private val unorderedFeatures = new mutable.HashMap[Int, Array[CategoricalSplit]]()
+
+    /**
+     * borrowed from [[DecisionTreeMetadata.buildMetadata]], lines 142-162
+     */
+    if (numClasses > 2) {
+      // Multiclass classification
+      val maxCategoriesForUnorderedFeature =
+        ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
+      categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
+        // Hack: If a categorical feature has only 1 category, we treat it as continuous.
+        // TODO(SPARK-9957): Handle this properly by filtering out those features.
+        if (numCategories > 1) {
+          // Decide if some categorical features should be treated as unordered features,
+          //  which require 2 * ((1 << numCategories - 1) - 1) bins.
+          // We do this check with log values to prevent overflows in case numCategories is large.
+          // The next check is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
+          if (numCategories <= maxCategoriesForUnorderedFeature) {
+            unorderedFeatures.put(featureIndex, findSplits(featureIndex, numCategories))
+          }
+        }
+      }
+    }
 
     /**
      * Returns all possible subsets of features for categorical splits.
+     * Borrowed from [[RandomForest.findSplits]], lines 877-892
      */
     private def findSplits(
                             featureIndex: Int,
@@ -82,31 +107,16 @@ private[ml] object AltDT extends Logging {
       splits
     }
 
-    def getUnorderedSplits(featureIndex: Int, featureArity: Int): Array[CategoricalSplit] = {
-      unorderedSplits.getOrElseUpdate(featureIndex, findSplits(featureIndex, featureArity))
+    def getUnorderedSplits(featureIndex: Int): Array[CategoricalSplit] = {
+      require(unorderedFeatures.contains(featureIndex))
+      unorderedFeatures.getOrElse(featureIndex, Array.empty[CategoricalSplit])
     }
-
-    private val maxCategoriesForUnorderedFeature =
-      ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
 
     def isClassification: Boolean = numClasses >= 2
 
     def isMulticlass: Boolean = numClasses > 2
 
-    /**
-     * Indicates whether a categorical feature should be treated as unordered.
-     *
-     * TODO(SPARK-9957): If a categorical feature has only 1 category, we treat it as continuous.
-     *                   Later, handle this properly by filtering out those features.
-     */
-    def isUnorderedFeature(numCategories: Int): Boolean = {
-      // Decide if some categorical features should be treated as unordered features,
-      //  which require 2 * ((1 << numCategories - 1) - 1) bins.
-      // We do this check with log values to prevent overflows in case numCategories is large.
-      // The last inequality is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
-      isMulticlass && numCategories > 1 &&
-        numCategories <= maxCategoriesForUnorderedFeature
-    }
+    def isUnorderedFeature(featureIndex: Int): Boolean = unorderedFeatures.contains(featureIndex)
 
     def createImpurityAggregator(): ImpurityAggregatorSingle = {
       impurity match {
@@ -119,7 +129,7 @@ private[ml] object AltDT extends Logging {
 
   private[impl] object AltDTMetadata {
     def fromStrategy(strategy: Strategy): AltDTMetadata = new AltDTMetadata(strategy.numClasses,
-      strategy.maxBins, strategy.minInfoGain, strategy.impurity)
+      strategy.maxBins, strategy.minInfoGain, strategy.impurity, strategy.categoricalFeaturesInfo)
   }
 
   /**
@@ -421,8 +431,8 @@ private[ml] object AltDT extends Logging {
       toOffset: Int,
       metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
     if (col.isCategorical) {
-      if (metadata.isUnorderedFeature(col.featureArity)) {
-        val splits: Array[CategoricalSplit] = metadata.getUnorderedSplits(col.featureIndex, col.featureArity)
+      if (metadata.isUnorderedFeature(col.featureIndex)) {
+        val splits: Array[CategoricalSplit] = metadata.getUnorderedSplits(col.featureIndex)
         chooseUnorderedCategoricalSplit(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset,
           metadata, col.featureArity, splits)
       } else {
@@ -465,11 +475,10 @@ private[ml] object AltDT extends Logging {
     // aggStats(category) = label statistics for category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    var i = 0
-    val len = to - from
-    while (i < len) {
-      val cat = values(from + i)
-      val label = labels(indices(from + i))
+    var i = from
+    while (i < to) {
+      val cat = values(i)
+      val label = labels(indices(i))
       aggStats(cat.toInt).update(label)
       i += 1
     }
@@ -604,11 +613,10 @@ private[ml] object AltDT extends Logging {
     // Label stats for each category
     val aggStats = Array.tabulate[ImpurityAggregatorSingle](featureArity)(
       _ => metadata.createImpurityAggregator())
-    val length = to - from
-    var i = 0
-    while (i < length) {
-      val cat = values(from + i)
-      val label = labels(indices(from + i))
+    var i = from
+    while (i < to) {
+      val cat = values(i)
+      val label = labels(indices(i))
       // NOTE: we assume the values for categorical features are Ints in [0,featureArity)
       aggStats(cat.toInt).update(label)
       i += 1
@@ -635,7 +643,7 @@ private[ml] object AltDT extends Logging {
       var bestSplit: Option[CategoricalSplit] = None
       val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
       var bestGain: Double = -1.0
-      val fullCount: Double = length
+      val fullCount: Double = to - from
       for (split <- splits) {
         // Update left, right impurity stats
         split.leftCategories.foreach(c => leftImpurityAgg.add(aggStats(c.toInt)))
@@ -688,10 +696,9 @@ private[ml] object AltDT extends Logging {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
-    var i = 0
-    val length = to - from
-    while (i < length) {
-      rightImpurityAgg.update(labels(indices(from + i)), 1.0)  // can we pass each label once with a weight equal to count?
+    var i = from
+    while (i < to) {
+      rightImpurityAgg.update(labels(indices(i)), 1.0)  // can we pass each label once with a weight equal to count?
       i += 1
     }
 
@@ -703,10 +710,10 @@ private[ml] object AltDT extends Logging {
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
-    var j = 0
-    while (j < length) {
-      val value = values(from + j)
-      val label = labels(indices(from + j))
+    var j = from
+    while (j < to) {
+      val value = values(j)
+      val label = labels(indices(j))
       if (value != currentThreshold) {
         // Check gain
         val leftWeight = leftCount / fullCount
@@ -858,11 +865,10 @@ private[ml] object AltDT extends Logging {
           val numBitsSet = {
             if (nodeOffsets.length == 2) instanceBitVector.getCardinality
             else {
-              var i = 0
               var count = 0
-              val len = to - from
-              while (i < len) {
-                if (instanceBitVector.contains(col.indices(from + i))) {
+              var i = from
+              while (i < to) {
+                if (instanceBitVector.contains(col.indices(i))) {
                   count += 1
                 }
                 i += 1
@@ -894,17 +900,16 @@ private[ml] object AltDT extends Logging {
             // 1) in the [from, numBitsNotSet) range if the bit is false, or
             // 2) in the [numBitsNotSet, to) range if the bit is true.
             var (leftInstanceIdx, rightInstanceIdx) = (from, from + numBitsNotSet)
-            var idx = 0
-            val length = to - from
-            while (idx < length) {
-              val indexForVal = col.indices(from + idx)
+            var idx = from
+            while (idx < to) {
+              val indexForVal = col.indices(idx)
               val bit = instanceBitVector.contains(indexForVal)
               if (bit) {
-                tempVals(rightInstanceIdx) = col.values(from + idx)
+                tempVals(rightInstanceIdx) = col.values(idx)
                 tempIndices(rightInstanceIdx) = indexForVal
                 rightInstanceIdx += 1
               } else {
-                tempVals(leftInstanceIdx) = col.values(from + idx)
+                tempVals(leftInstanceIdx) = col.values(idx)
                 tempIndices(leftInstanceIdx) = indexForVal
                 leftInstanceIdx += 1
               }
@@ -914,8 +919,8 @@ private[ml] object AltDT extends Logging {
 
             // update the column values and indices
             // with the corresponding indices
-            System.arraycopy(tempVals, from, col.values, from, length)
-            System.arraycopy(tempIndices, from, col.indices, from, length)
+            System.arraycopy(tempVals, from, col.values, from, to - from)
+            System.arraycopy(tempIndices, from, col.indices, from, to - from)
           }
         }
         col
