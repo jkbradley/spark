@@ -753,8 +753,8 @@ private[ml] object AltDT extends Logging {
    * outcome of the split for each instance at that node.
    *
    * @param col  Column for feature
-   * @param fromOffset  Start offset in col for the node
-   * @param toOffset  End offset in col for the node
+   * @param from  Start offset in col for the node
+   * @param to  End offset in col for the node
    * @param split  Split to apply to instances at this node.
    * @return  Bits indicating splits for instances at this node.
    *          These bits are sorted by the row indices, in order to guarantee an ordering
@@ -764,18 +764,16 @@ private[ml] object AltDT extends Logging {
    *          bit[index in sorted array of row indices] = false for left, true for right
    */
   private[impl] def bitVectorFromSplit(
-      col: FeatureVector,
-      fromOffset: Int,
-      toOffset: Int,
-      split: Split,
-      numRows: Int): RoaringBitmap = {
-    val nodeRowIndices = col.indices.view.slice(fromOffset, toOffset)
-    val nodeRowValues = col.values.view.slice(fromOffset, toOffset)
+                                        col: FeatureVector,
+                                        from: Int,
+                                        to: Int,
+                                        split: Split,
+                                        numRows: Int): RoaringBitmap = {
     val bitv = new RoaringBitmap()
-    var i = 0
-    while (i < nodeRowValues.length) {
-      val value = nodeRowValues(i)
-      val idx = nodeRowIndices(i)
+    var i = from
+    while (i < to) {
+      val value = col.values(i)
+      val idx = col.indices(i)
       if (!split.shouldGoLeft(value)) {
         bitv.add(idx)
       }
@@ -852,7 +850,6 @@ private[ml] object AltDT extends Logging {
       val newColumns = columns.map { col =>
         activeNodes.iterator.foreach { nodeIdx =>
           // WHAT TO OPTIMIZE:
-          // - no views, just use array offsets
           // - try skipping numBitsSet
           // - maybe uncompress bitmap
           val from = nodeOffsets(nodeIdx)
