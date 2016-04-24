@@ -344,25 +344,38 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Array(0.0, 0.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map.empty[Int, Int])
-    val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, values.indices.toArray, labels,
-      0, values.length, metadata)
-    split match {
-      case Some(s: ContinuousSplit) =>
-        assert(s.featureIndex === featureIndex)
-        assert(s.threshold === 0.2)
-      case _ =>
-        throw new AssertionError(
-          s"Expected ContinuousSplit but got ${split.getClass.getSimpleName}")
+
+    def checkSplitAndStats(split: Option[Split], stats: ImpurityStats) = {
+      split match {
+        case Some(s: ContinuousSplit) =>
+          assert(s.featureIndex === featureIndex)
+          assert(s.threshold === 0.2)
+        case _ =>
+          throw new AssertionError(
+            s"Expected ContinuousSplit but got ${split.getClass.getSimpleName}")
+      }
+      val fullImpurityStatsArray =
+        Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+      val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+      assert(stats.gain === fullImpurity)
+      assert(stats.impurity === fullImpurity)
+      assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+      assert(stats.leftImpurityCalculator.stats === Array(2.0, 0.0))
+      assert(stats.rightImpurityCalculator.stats === Array(0.0, 3.0))
+      assert(stats.valid)
     }
-    val fullImpurityStatsArray =
-      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
-    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
-    assert(stats.gain === fullImpurity)
-    assert(stats.impurity === fullImpurity)
-    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
-    assert(stats.leftImpurityCalculator.stats === Array(2.0, 0.0))
-    assert(stats.rightImpurityCalculator.stats === Array(0.0, 3.0))
-    assert(stats.valid)
+
+    val (split, stats) = AltDT.chooseContinuousSplitCache(featureIndex, values, values.indices.toArray, labels,
+      0, values.length, metadata)
+    checkSplitAndStats(split, stats)
+
+    val (split2, stats2) = AltDT.chooseContinuousSplitAllLabels(featureIndex, values, values.indices.toArray,
+      labels, 0, values.length, metadata)
+    checkSplitAndStats(split2, stats2)
+
+    val (split3, stats3) = AltDT.chooseContinuousSplitNaive(featureIndex, values, values.indices.toArray, labels,
+      0, values.length, metadata)
+    checkSplitAndStats(split3, stats3)
   }
 
   test("chooseContinuousSplit: return bad split if we should not split") {
@@ -371,17 +384,30 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Array(0.0, 0.0, 0.0, 0.0, 0.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map.empty[Int, Int])
-    val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, values.indices.toArray, labels,
+
+    def checkSplitAndStats(split: Option[Split], stats: ImpurityStats) = {
+      // split should be None
+      assert(split.isEmpty)
+      // stats for parent node should be correct
+      val fullImpurityStatsArray =
+        Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+      val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
+      assert(stats.gain === 0.0)
+      assert(stats.impurity === fullImpurity)
+      assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+    }
+
+    val (split, stats) = AltDT.chooseContinuousSplitCache(featureIndex, values, values.indices.toArray, labels,
       0, values.length, metadata)
-    // split should be None
-    assert(split.isEmpty)
-    // stats for parent node should be correct
-    val fullImpurityStatsArray =
-      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
-    val fullImpurity = impurity.calculate(fullImpurityStatsArray, labels.length)
-    assert(stats.gain === 0.0)
-    assert(stats.impurity === fullImpurity)
-    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+    checkSplitAndStats(split, stats)
+
+    val (split2, stats2) = AltDT.chooseContinuousSplitAllLabels(featureIndex, values, values.indices.toArray, labels,
+      0, values.length, metadata)
+    checkSplitAndStats(split2, stats2)
+
+    val (split3, stats3) = AltDT.chooseContinuousSplitNaive(featureIndex, values, values.indices.toArray, labels,
+      0, values.length, metadata)
+    checkSplitAndStats(split3, stats3)
   }
 
   /* * * * * * * * * * * Bit subvectors * * * * * * * * * * */
