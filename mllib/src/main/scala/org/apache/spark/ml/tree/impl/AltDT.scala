@@ -127,6 +127,8 @@ private[ml] object AltDT extends Logging {
       strategy.maxBins, strategy.minInfoGain, strategy.impurity, strategy.categoricalFeaturesInfo)
   }
 
+  val L3_CACHE_SIZE = 1000000
+
   /**
    * Method to train a decision tree model over an RDD.
    */
@@ -435,7 +437,13 @@ private[ml] object AltDT extends Logging {
           metadata, col.featureArity)
       }
     } else {
-      chooseContinuousSplit(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset, metadata)
+      if (fromOffset == 0 && toOffset == labels.length) {
+        chooseContinuousSplitAllLabels(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset, metadata)
+      } else if (toOffset - fromOffset <= L3_CACHE_SIZE) {
+        chooseContinuousSplitCache(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset, metadata)
+      } else {
+        chooseContinuousSplitNaive(col.featureIndex, col.values, col.indices, labels, fromOffset, toOffset, metadata)
+      }
     }
   }
 
@@ -674,36 +682,31 @@ private[ml] object AltDT extends Logging {
     }
   }
 
-  /**
-   * Choose splitting rule: feature value <= threshold
-   * @return  (best split, statistics for split)  If the best split actually puts all instances
-   *          in one leaf node, then it will be set to None.  The impurity stats maybe still be
-   *          useful, so they are returned.
-   */
-  private[impl] def chooseContinuousSplit(
-      featureIndex: Int,
-      values: Array[Double],
-      indices: Array[Int],
-      labels: Array[Double],
-      from: Int,
-      to: Int,
-      metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
+  private[impl] def chooseContinuousSplitAllLabels(
+                                                    featureIndex: Int,
+                                                    values: Array[Double],
+                                                    indices: Array[Int],
+                                                    labels: Array[Double],
+                                                    from: Int,
+                                                    to: Int,
+                                                    metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val rightImpurityAgg = metadata.createImpurityAggregator()
+
     var i = from
-    while (i < to) {
-      rightImpurityAgg.update(labels(indices(i)), 1.0)  // can we pass each label once with a weight equal to count?
-      i += 1
-    }
+      while (i < to) {
+        rightImpurityAgg.update(labels(i), 1.0)
+        i += 1
+      }
 
     var bestThreshold: Double = Double.NegativeInfinity
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
     var bestGain: Double = 0.0
     val fullImpurity = rightImpurityAgg.getCalculator.calculate()
-    var leftCount: Double = 0.0
-    var rightCount: Double = rightImpurityAgg.getCount
-    val fullCount: Double = rightCount
+    var leftCount: Int = 0
+    val fullCount: Double = rightImpurityAgg.getCount
+    var rightCount: Int = fullCount.toInt
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
     var j = from
     while (j < to) {
@@ -726,8 +729,8 @@ private[ml] object AltDT extends Logging {
       // Move this instance from right to left side of split.
       leftImpurityAgg.update(label, 1.0)
       rightImpurityAgg.update(label, -1.0)
-      leftCount += 1.0
-      rightCount -= 1.0
+      leftCount += 1
+      rightCount -= 1
       j += 1
     }
 
@@ -742,6 +745,148 @@ private[ml] object AltDT extends Logging {
     }
     (split, bestImpurityStats)
   }
+
+  /**
+   * Choose splitting rule: feature value <= threshold
+   * @return  (best split, statistics for split)  If the best split actually puts all instances
+   *          in one leaf node, then it will be set to None.  The impurity stats maybe still be
+   *          useful, so they are returned.
+   */
+  private[impl] def chooseContinuousSplitCache(
+                                                featureIndex: Int,
+                                                values: Array[Double],
+                                                indices: Array[Int],
+                                                labels: Array[Double],
+                                                from: Int,
+                                                to: Int,
+                                                metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
+
+    val leftImpurityAgg = metadata.createImpurityAggregator()
+    val rightImpurityAgg = metadata.createImpurityAggregator()
+
+    val labelsCache = new Array[Double](to - from)
+    var i = from
+    var labelsIdx = 0
+    while (i < to) {
+      // can we pass each label once with a weight equal to count?
+      labelsCache(labelsIdx) = labels(indices(i))
+      rightImpurityAgg.update(labelsCache(labelsIdx), 1.0)
+      labelsIdx += 1
+      i += 1
+    }
+
+    var bestThreshold: Double = Double.NegativeInfinity
+    val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+    var bestGain: Double = 0.0
+    val fullImpurity = rightImpurityAgg.getCalculator.calculate()
+    var leftCount: Int = 0
+    val fullCount: Double = rightImpurityAgg.getCount
+    var rightCount: Int = fullCount.toInt
+    var currentThreshold = values.headOption.getOrElse(bestThreshold)
+    var j = from
+    labelsIdx = 0
+    while (j < to) {
+      val value = values(j)
+      val label = labelsCache(labelsIdx)
+      if (value != currentThreshold) {
+        // Check gain
+        val leftWeight = leftCount / fullCount
+        val rightWeight = rightCount / fullCount
+        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
+        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
+        if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
+          bestThreshold = currentThreshold
+          System.arraycopy(leftImpurityAgg.stats, 0, bestLeftImpurityAgg.stats, 0, leftImpurityAgg.stats.length)
+          bestGain = gain
+        }
+        currentThreshold = value
+      }
+      // Move this instance from right to left side of split.
+      leftImpurityAgg.update(label, 1.0)
+      rightImpurityAgg.update(label, -1.0)
+      leftCount += 1
+      rightCount -= 1
+      j += 1
+      labelsIdx += 1
+    }
+
+    val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
+    val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
+    val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
+      bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
+    val split = if (bestThreshold != Double.NegativeInfinity && bestThreshold != values.last) {
+      Some(new ContinuousSplit(featureIndex, bestThreshold))
+    } else {
+      None
+    }
+    (split, bestImpurityStats)
+  }
+
+  def chooseContinuousSplitNaive(
+                                  featureIndex: Int,
+                                  values: Array[Double],
+                                  indices: Array[Int],
+                                  labels: Array[Double],
+                                  from: Int,
+                                  to: Int,
+                                  metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
+    val leftImpurityAgg = metadata.createImpurityAggregator()
+    val rightImpurityAgg = metadata.createImpurityAggregator()
+
+    var i = from
+    while (i < to) {
+      rightImpurityAgg.update(labels(indices(i)), 1.0)
+      i += 1
+    }
+
+    var bestThreshold: Double = Double.NegativeInfinity
+    val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+    var bestGain: Double = 0.0
+    val fullImpurity = rightImpurityAgg.getCalculator.calculate()
+    var leftCount: Int = 0
+    val fullCount: Double = rightImpurityAgg.getCount
+    var rightCount: Int = fullCount.toInt
+    var currentThreshold = values.headOption.getOrElse(bestThreshold)
+    var j = from
+    while (j < to) {
+      val value = values(j)
+      val label = labels(indices(j))
+      if (value != currentThreshold) {
+        // Check gain
+        val leftWeight = leftCount / fullCount
+        val rightWeight = rightCount / fullCount
+        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
+        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
+        if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
+          bestThreshold = currentThreshold
+          System.arraycopy(leftImpurityAgg.stats, 0, bestLeftImpurityAgg.stats, 0, leftImpurityAgg.stats.length)
+          bestGain = gain
+        }
+        currentThreshold = value
+      }
+      // Move this instance from right to left side of split.
+      leftImpurityAgg.update(label, 1.0)
+      rightImpurityAgg.update(label, -1.0)
+      leftCount += 1
+      rightCount -= 1
+      j += 1
+    }
+
+    val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
+    val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
+    val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
+      bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
+    val split = if (bestThreshold != Double.NegativeInfinity && bestThreshold != values.last) {
+      Some(new ContinuousSplit(featureIndex, bestThreshold))
+    } else {
+      None
+    }
+    (split, bestImpurityStats)
+
+  }
+
 
   /**
    * For a given feature, for a given node, apply a split and return a bit vector indicating the
