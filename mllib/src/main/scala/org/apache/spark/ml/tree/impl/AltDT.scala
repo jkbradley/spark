@@ -24,15 +24,13 @@ import org.apache.spark.ml.tree.impl.TreeUtil._
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.Strategy
+import org.apache.spark.mllib.tree.impl.DecisionTreeMetadata
 import org.apache.spark.mllib.tree.impurity.{Entropy, Gini, Impurity, Variance}
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.collection.{BitSet, SortDataFormat, Sorter}
 import org.roaringbitmap.RoaringBitmap
-import org.apache.spark.mllib.tree.impl.DecisionTreeMetadata
-
-import scala.collection.mutable
 
 
 /**
@@ -60,33 +58,33 @@ private[ml] object AltDT extends Logging {
       val impurity: Impurity,
       val categoricalFeaturesInfo: Map[Int, Int]) extends Serializable {
 
-    private val unorderedFeatures = new mutable.HashMap[Int, Array[CategoricalSplit]]()
-
-    /**
-     * borrowed from [[DecisionTreeMetadata.buildMetadata]], lines 142-162
-     */
-    if (numClasses > 2) {
-      // Multiclass classification
-      val maxCategoriesForUnorderedFeature =
-        ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
-      categoricalFeaturesInfo.foreach { case (featureIndex, numCategories) =>
-        // Hack: If a categorical feature has only 1 category, we treat it as continuous.
-        // TODO(SPARK-9957): Handle this properly by filtering out those features.
-        if (numCategories > 1) {
+    private val unorderedSplits = {
+      /**
+       * borrowed from [[DecisionTreeMetadata.buildMetadata]]
+       */
+      if (numClasses > 2) {
+        // Multiclass classification
+        val maxCategoriesForUnorderedFeature =
+          ((math.log(maxBins / 2 + 1) / math.log(2.0)) + 1).floor.toInt
+        categoricalFeaturesInfo.filter { case (featureIndex, numCategories) =>
+            numCategories > 1 && numCategories <= maxCategoriesForUnorderedFeature
+        }.map { case (featureIndex, numCategories) =>
+          // Hack: If a categorical feature has only 1 category, we treat it as continuous.
+          // TODO(SPARK-9957): Handle this properly by filtering out those features.
           // Decide if some categorical features should be treated as unordered features,
           //  which require 2 * ((1 << numCategories - 1) - 1) bins.
           // We do this check with log values to prevent overflows in case numCategories is large.
           // The next check is equivalent to: 2 * ((1 << numCategories - 1) - 1) <= maxBins
-          if (numCategories <= maxCategoriesForUnorderedFeature) {
-            unorderedFeatures.put(featureIndex, findSplits(featureIndex, numCategories))
-          }
-        }
+              featureIndex -> findSplits(featureIndex, numCategories)
+            }
+      } else {
+        Map.empty[Int, Array[CategoricalSplit]]
       }
     }
 
     /**
      * Returns all possible subsets of features for categorical splits.
-     * Borrowed from [[RandomForest.findSplits]], lines 877-892
+     * Borrowed from [[RandomForest.findSplits]]
      */
     private def findSplits(
                             featureIndex: Int,
@@ -107,16 +105,13 @@ private[ml] object AltDT extends Logging {
       splits
     }
 
-    def getUnorderedSplits(featureIndex: Int): Array[CategoricalSplit] = {
-      require(unorderedFeatures.contains(featureIndex))
-      unorderedFeatures.getOrElse(featureIndex, Array.empty[CategoricalSplit])
-    }
+    def getUnorderedSplits(featureIndex: Int): Array[CategoricalSplit] = unorderedSplits(featureIndex)
 
     def isClassification: Boolean = numClasses >= 2
 
     def isMulticlass: Boolean = numClasses > 2
 
-    def isUnorderedFeature(featureIndex: Int): Boolean = unorderedFeatures.contains(featureIndex)
+    def isUnorderedFeature(featureIndex: Int): Boolean = unorderedSplits.contains(featureIndex)
 
     def createImpurityAggregator(): ImpurityAggregatorSingle = {
       impurity match {
