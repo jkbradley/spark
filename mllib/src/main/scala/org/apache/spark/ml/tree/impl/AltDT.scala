@@ -993,12 +993,12 @@ private[ml] object AltDT extends Logging {
         val to = nodeOffsets(nodeIdx + 1)
         val newOffsets = newNodeOffsets(nodeIdx)
 
-        val numBitsNotSet = newOffsets(1) - newOffsets(0)
-        val numBitsSet = to - from - numBitsNotSet
+        // We determined that this node was split in first()
+        if (newOffsets.length == 2) {
+          val numBitsNotSet = newOffsets(1) - newOffsets(0)
 
-        // Same as above, but we don't compute the left and right impurities for
-        // the resulitng child nodes
-        if (numBitsNotSet != 0 && numBitsSet != 0) {
+          // Same as above, but we don't compute the left and right impurities for
+          // the resulitng child nodes
           var (leftInstanceIdx, rightInstanceIdx) = (from, from + numBitsNotSet)
           var idx = from
           while (idx < to) {
