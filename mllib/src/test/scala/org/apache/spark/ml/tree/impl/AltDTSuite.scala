@@ -20,7 +20,7 @@ package org.apache.spark.ml.tree.impl
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.regression.DecisionTreeRegressor
 import org.apache.spark.ml.tree._
-import org.apache.spark.ml.tree.impl.AltDT.{AltDTMetadata, FeatureVector, PartitionInfo}
+import org.apache.spark.ml.tree.impl.AltDT.{PartitionInfo, AltDTMetadata, FeatureVector}
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.impurity._
@@ -149,13 +149,19 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
       FeatureVector.fromOriginal(0, 0, Vectors.dense(0.8, 0.2, 0.1, 0.6))
     val col2 =
       FeatureVector.fromOriginal(1, 3, Vectors.dense(0, 1, 0, 2))
+    val labels = Array(0, 0, 0, 1, 1, 1, 1).map(_.toDouble)
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, Entropy, Map(1 -> 3))
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
+
     assert(col1.values.length === numRows)
     assert(col2.values.length === numRows)
+
     val nodeOffsets = Array(0, numRows)
     val activeNodes = new BitSet(1)
     activeNodes.set(0)
 
-    val info = PartitionInfo(Array(col1, col2), nodeOffsets, activeNodes)
+    val info = PartitionInfo(Array(col1, col2), nodeOffsets, activeNodes, Array(fullImpurityAgg))
 
     // Create bitVector for splitting the 4 rows: L, R, L, R
     // New groups are {0, 2}, {1, 3}
@@ -164,7 +170,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     bitVector.add(3)
 
     // for these tests, use the activeNodes for nodeSplitBitVector
-    val newInfo = info.update(bitVector, newNumNodeOffsets = 3)
+    val newInfo = info.update(bitVector, newNumNodeOffsets = 3, labels, metadata)
 
     assert(newInfo.columns.length === 2)
     val expectedCol1a =
@@ -176,12 +182,21 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     assert(newInfo.nodeOffsets === Array(0, 2, 4))
     assert(newInfo.activeNodes.iterator.toSet === Set(0, 1))
 
+    // stats for the two child nodes should be correct
+//    val fullImpurityStatsArray =
+//      Array(labels.count(_ == 0.0).toDouble, labels.count(_ == 1.0).toDouble)
+//    val fullImpurity = Entropy.calculate(fullImpurityStatsArray, labels.length)
+//    val stats = newInfo.fullImpurityAggs(0).getCalculator.
+//    assert(stats.gain === 0.0)
+//    assert(stats.impurity === fullImpurity)
+//    assert(stats.impurityCalculator.stats === fullImpurityStatsArray)
+
     // Create 2 bitVectors for splitting into: 0, 2, 1, 3
     val bitVector2 = new RoaringBitmap()
     bitVector2.add(2) // 2 goes to the right
     bitVector2.add(3) // 3 goes to the right
 
-    val newInfo2 = newInfo.update(bitVector2, newNumNodeOffsets = 5)
+    val newInfo2 = newInfo.update(bitVector2, newNumNodeOffsets = 5, labels, metadata)
 
     assert(newInfo2.columns.length === 2)
     val expectedCol2a =
@@ -209,20 +224,22 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   }
 
   test("chooseSplit: choose correct type of split") {
-    val labels = Seq(0, 0, 0, 1, 1, 1, 1).map(_.toDouble).toArray
+    val labels = Array(0, 0, 0, 1, 1, 1, 1).map(_.toDouble)
     val fromOffset = 1
     val toOffset = 4
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map(1 -> 3))
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
 
     val col1 = FeatureVector.fromOriginal(featureIndex = 0, featureArity = 0,
       featureVector = Vectors.dense(0.8, 0.1, 0.1, 0.2, 0.3, 0.5, 0.6))
-    val (split1, _) = AltDT.chooseSplit(col1, labels, fromOffset, toOffset, metadata)
+    val (split1, _) = AltDT.chooseSplit(col1, labels, fromOffset, toOffset, fullImpurityAgg, metadata)
     assert(split1.nonEmpty && split1.get.isInstanceOf[ContinuousSplit])
 
     val col2 = FeatureVector.fromOriginal(featureIndex = 1, featureArity = 3,
       featureVector = Vectors.dense(0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0))
-    val (split2, _) = AltDT.chooseSplit(col2, labels, fromOffset, toOffset, metadata)
+    val (split2, _) = AltDT.chooseSplit(col2, labels, fromOffset, toOffset, fullImpurityAgg, metadata)
     assert(split2.nonEmpty && split2.get.isInstanceOf[CategoricalSplit])
   }
 
@@ -344,8 +361,11 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Array(0.0, 0.0, 1.0, 1.0, 1.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map.empty[Int, Int])
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
+
     val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, values.indices.toArray, labels,
-      0, values.length, metadata)
+      0, values.length, fullImpurityAgg, metadata)
     split match {
       case Some(s: ContinuousSplit) =>
         assert(s.featureIndex === featureIndex)
@@ -371,8 +391,11 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val labels = Array(0.0, 0.0, 0.0, 0.0, 0.0)
     val impurity = Entropy
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map.empty[Int, Int])
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
+
     val (split, stats) = AltDT.chooseContinuousSplit(featureIndex, values, values.indices.toArray, labels,
-      0, values.length, metadata)
+      0, values.length, fullImpurityAgg, metadata)
     // split should be None
     assert(split.isEmpty)
     // stats for parent node should be correct
@@ -425,7 +448,12 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val numRows = col.values.length
     val activeNodes = new BitSet(1)
     activeNodes.set(0)
-    val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
+    val labels = Array(0, 0, 0, 1, 1, 1, 1).map(_.toDouble)
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, Entropy, Map(1 -> 3))
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
+
+    val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes, Array(fullImpurityAgg))
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = 0.5)
     val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
@@ -439,7 +467,12 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val numRows = col.values.length
     val activeNodes = new BitSet(1)
     activeNodes.set(0)
-    val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes)
+    val labels = Array(0, 0, 0, 1, 1, 1, 1).map(_.toDouble)
+    val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, Entropy, Map(1 -> 3))
+    val fullImpurityAgg = metadata.createImpurityAggregator()
+    labels.foreach(label => fullImpurityAgg.update(label))
+
+    val info = PartitionInfo(Array(col), Array(0, numRows), activeNodes, Array(fullImpurityAgg))
     val partitionInfos = sc.parallelize(Seq(info))
     val bestSplit = new ContinuousSplit(0, threshold = -2.0)
     val bitVector = AltDT.aggregateBitVector(partitionInfos, Array(Some(bestSplit)), numRows)
