@@ -128,7 +128,15 @@ private[spark] class GiniCalculator(stats: Array[Double]) extends ImpurityCalcul
   /**
    * Calculate the impurity from the stored sufficient statistics.
    */
-  def calculate(): Double = Gini.calculate(stats, stats.sum)
+  def calculate(): Double = {
+    var sum: Double = 0
+    var i = 0
+    while (i < stats.length) {
+      sum += stats(i)
+      i += 1
+    }
+    Gini.calculate(stats, sum)
+  }
 
   /**
    * Number of data points accounted for in the sufficient statistics.

@@ -50,7 +50,7 @@ object TreeUtil {
    *       (First collect stats to decide how to partition.)
    * TODO: Move elsewhere in MLlib.
    */
-  def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Vector)] = {
+  def rowToColumnStoreDense(rowStore: RDD[Vector]): RDD[(Int, Array[Double])] = {
 
     val numRows = {
       val longNumRows: Long = rowStore.count()
@@ -59,11 +59,11 @@ object TreeUtil {
       longNumRows.toInt
     }
     if (numRows == 0) {
-      return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
+      return rowStore.sparkContext.parallelize(Seq.empty[(Int, Array[Double])])
     }
     val numCols = rowStore.take(1)(0).size
     if (numCols == 0) {
-      return rowStore.sparkContext.parallelize(Seq.empty[(Int, Vector)])
+      return rowStore.sparkContext.parallelize(Seq.empty[(Int, Array[Double])])
     }
 
     val numSourcePartitions = rowStore.partitions.length
@@ -100,7 +100,7 @@ object TreeUtil {
           groupIndex += 1
         }
         while (iterator.hasNext) {
-          val row: Vector = iterator.next()
+          val row = iterator.next.toArray
           var groupIndex = 0
           while (groupIndex < numTargetPartitions) {
             val fromCol = groupIndex * maxColumnsPerPartition
@@ -154,8 +154,8 @@ object TreeUtil {
         colIdx += 1
       }
       val columnIndices = Range(0, numColumnsInPartition).map(_ + fromCol)
-      val columns = partitionColumns.map(Vectors.dense)
-      columnIndices.zip(columns)
+//      val columns = partitionColumns.map(Vectors.dense)
+      columnIndices.zip(partitionColumns)
     }
 
     fullColumns

@@ -97,12 +97,12 @@ final class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val 
 
   def fit(
       dataset: DataFrame,
-      transposedDataset: RDD[(Int, Vector)]): DecisionTreeRegressionModel =
+      transposedDataset: RDD[(Int, Array[Double])]): DecisionTreeRegressionModel =
     train(dataset, Some(transposedDataset))
 
   private def train(
       dataset: DataFrame,
-      transposedDataset: Option[RDD[(Int, Vector)]]): DecisionTreeRegressionModel = {
+      transposedDataset: Option[RDD[(Int, Array[Double])]]): DecisionTreeRegressionModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)

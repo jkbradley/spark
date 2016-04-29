@@ -34,7 +34,7 @@ class TreeUtilSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val rowStore = sc.parallelize(rows, numRowPartitions)
     val colStore = rowToColumnStoreDense(rowStore)
     val numColPartitions = colStore.partitions.length
-    val cols: Map[Int, Vector] = colStore.collect().toMap
+    val cols: Map[Int, Array[Double]] = colStore.collect().toMap
     val numRows = rows.size
     if (numRows == 0) {
       assert(cols.isEmpty)
@@ -61,7 +61,6 @@ class TreeUtilSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val overPartitionFactor = 2
     val rowStore = sc.parallelize(rows, numRowPartitions)
     val colStore = rowToColumnStoreSparse(rowStore, overPartitionFactor)
-    val numColPartitions = colStore.partitions.length
     val cols: Map[Int, Vector] = colStore.collect().toMap
     val numRows = rows.size
     // Check cases with 0 rows or cols

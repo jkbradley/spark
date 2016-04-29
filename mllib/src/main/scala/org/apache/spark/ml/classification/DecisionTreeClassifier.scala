@@ -100,12 +100,12 @@ final class DecisionTreeClassifier @Since("1.4.0") (
 
   def fit(
       dataset: DataFrame,
-      transposedDataset: RDD[(Int, Vector)]): DecisionTreeClassificationModel =
+      transposedDataset: RDD[(Int, Array[Double])]): DecisionTreeClassificationModel =
     train(dataset, Some(transposedDataset))
 
   private def train(
       dataset: DataFrame,
-      transposedDataset: Option[RDD[(Int, Vector)]]): DecisionTreeClassificationModel = {
+      transposedDataset: Option[RDD[(Int, Array[Double])]]): DecisionTreeClassificationModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val numClasses: Int = MetadataUtils.getNumClasses(dataset.schema($(labelCol))) match {

@@ -122,7 +122,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     vCopy.values(0) = 1000
     assert(v.values(0) !== vCopy.values(0))
 
-    val original = Vectors.dense(0.7, 0.1, 0.3)
+    val original = Array(0.7, 0.1, 0.3)
     val v2 = FeatureVector.fromOriginal(1, 0, original)
     assert(v === v2)
   }
@@ -132,11 +132,10 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val col = Random.shuffle(values.toIterator).toArray
     val unsortedIndices = col.indices
     val sortedIndices = unsortedIndices.sortBy(x => col(x)).toArray
-    val fvUnsorted = Vectors.dense(col)
     val featureIndex = 3
     val featureArity = 0
     val fvSorted =
-      FeatureVector.fromOriginal(featureIndex, featureArity, fvUnsorted)
+      FeatureVector.fromOriginal(featureIndex, featureArity, col)
     assert(fvSorted.featureIndex === featureIndex)
     assert(fvSorted.featureArity === featureArity)
     assert(fvSorted.values.deep === values.deep)
@@ -146,9 +145,9 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
   test("PartitionInfo") {
     val numRows = 4
     val col1 =
-      FeatureVector.fromOriginal(0, 0, Vectors.dense(0.8, 0.2, 0.1, 0.6))
+      FeatureVector.fromOriginal(0, 0, Array(0.8, 0.2, 0.1, 0.6))
     val col2 =
-      FeatureVector.fromOriginal(1, 3, Vectors.dense(0, 1, 0, 2))
+  FeatureVector.fromOriginal(1, 3, Array(0, 1, 0, 2))
     assert(col1.values.length === numRows)
     assert(col2.values.length === numRows)
     val nodeOffsets = Array(0, numRows)
@@ -216,12 +215,12 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
     val metadata = new AltDTMetadata(numClasses = 2, maxBins = 4, minInfoGain = 0.0, impurity, Map(1 -> 3))
 
     val col1 = FeatureVector.fromOriginal(featureIndex = 0, featureArity = 0,
-      featureVector = Vectors.dense(0.8, 0.1, 0.1, 0.2, 0.3, 0.5, 0.6))
+      values = Array(0.8, 0.1, 0.1, 0.2, 0.3, 0.5, 0.6))
     val (split1, _) = AltDT.chooseSplit(col1, labels, fromOffset, toOffset, metadata)
     assert(split1.nonEmpty && split1.get.isInstanceOf[ContinuousSplit])
 
     val col2 = FeatureVector.fromOriginal(featureIndex = 1, featureArity = 3,
-      featureVector = Vectors.dense(0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0))
+      values = Array(0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0))
     val (split2, _) = AltDT.chooseSplit(col2, labels, fromOffset, toOffset, metadata)
     assert(split2.nonEmpty && split2.get.isInstanceOf[CategoricalSplit])
   }
@@ -388,7 +387,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
   test("bitSubvectorFromSplit: 1 node") {
     val col =
-      FeatureVector.fromOriginal(0, 0, Vectors.dense(0.1, 0.2, 0.4, 0.6, 0.7))
+      FeatureVector.fromOriginal(0, 0, Array(0.1, 0.2, 0.4, 0.6, 0.7))
     val fromOffset = 0
     val toOffset = col.values.length
     val numRows = toOffset
@@ -421,7 +420,7 @@ class AltDTSuite extends SparkFunSuite with MLlibTestSparkContext  {
 
   test("collectBitVectors with 1 vector") {
     val col =
-      FeatureVector.fromOriginal(0, 0, Vectors.dense(0.1, 0.2, 0.4, 0.6, 0.7))
+      FeatureVector.fromOriginal(0, 0, Array(0.1, 0.2, 0.4, 0.6, 0.7))
     val numRows = col.values.length
     val activeNodes = new BitSet(1)
     activeNodes.set(0)
