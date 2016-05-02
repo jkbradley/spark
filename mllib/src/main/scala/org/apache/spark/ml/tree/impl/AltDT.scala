@@ -697,18 +697,18 @@ private[ml] object AltDT extends Logging {
       labels: Array[Double],
       from: Int,
       to: Int,
-      initImpurityAgg: ImpurityAggregatorSingle,
+      fullImpurityAgg: ImpurityAggregatorSingle,
       metadata: AltDTMetadata): (Option[Split], ImpurityStats) = {
 
     val leftImpurityAgg = metadata.createImpurityAggregator()
-    val rightImpurityAgg = initImpurityAgg.deepCopy()
+    val rightImpurityAgg = fullImpurityAgg.deepCopy()
 
     var bestThreshold: Double = Double.NegativeInfinity
-    val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
+    val bestLeftImpurityAgg = metadata.createImpurityAggregator()
     var bestGain: Double = 0.0
     val fullImpurity = rightImpurityAgg.getCalculator.calculate()
-    var leftCount: Double = 0.0
-    var rightCount: Double = rightImpurityAgg.getCount
+    var leftCount: Int = 0
+    var rightCount: Int = to - from
     val fullCount: Double = rightCount
     var currentThreshold = values.headOption.getOrElse(bestThreshold)
     var j = from
@@ -730,14 +730,13 @@ private[ml] object AltDT extends Logging {
         currentThreshold = value
       }
       // Move this instance from right to left side of split.
-      leftImpurityAgg.update(label, 1.0)
-      rightImpurityAgg.update(label, -1.0)
-      leftCount += 1.0
-      rightCount -= 1.0
+      leftImpurityAgg.update(label, 1)
+      rightImpurityAgg.update(label, -1)
+      leftCount += 1
+      rightCount -= 1
       j += 1
     }
 
-    val fullImpurityAgg = leftImpurityAgg.deepCopy().add(rightImpurityAgg)
     val bestRightImpurityAgg = fullImpurityAgg.deepCopy().subtract(bestLeftImpurityAgg)
     val bestImpurityStats = new ImpurityStats(bestGain, fullImpurity, fullImpurityAgg.getCalculator,
       bestLeftImpurityAgg.getCalculator, bestRightImpurityAgg.getCalculator)
