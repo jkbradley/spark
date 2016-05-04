@@ -26,6 +26,9 @@ import org.apache.spark.mllib.tree.impurity.{EntropyCalculator, GiniCalculator, 
 private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
   extends Serializable {
 
+  protected var impurity: Double = 1.0
+  protected var count: Double = 0.0
+
   def statsSize: Int = stats.length
 
   /**
@@ -35,7 +38,7 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
   def add(other: ImpurityAggregatorSingle): this.type = {
     var i = 0
     while (i < statsSize) {
-      stats(i) += other.stats(i)
+      update(i, other.stats(i))
       i += 1
     }
     this
@@ -48,7 +51,7 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
   def subtract(other: ImpurityAggregatorSingle): this.type = {
     var i = 0
     while (i < statsSize) {
-      stats(i) -= other.stats(i)
+      update(i, -other.stats(i))
       i += 1
     }
     this
@@ -71,6 +74,8 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
 
   def deepCopy(): ImpurityAggregatorSingle
 
+  def calculate(): Double
+
   /** Total (weighted) count of instances in this aggregator */
   def getCount: Double
 
@@ -81,6 +86,8 @@ private[tree] abstract class ImpurityAggregatorSingle(val stats: Array[Double])
       stats(i) = 0.0
       i += 1
     }
+    count = 0.0
+    impurity = 1.0
     this
   }
 }
@@ -107,6 +114,8 @@ private[tree] class EntropyAggregatorSingle private (stats: Array[Double])
   override def deepCopy(): ImpurityAggregatorSingle = new EntropyAggregatorSingle(stats.clone())
 
   override def getCount: Double = stats.sum
+
+  override def calculate(): Double = getCalculator.calculate()
 }
 
 /**
@@ -122,15 +131,30 @@ private[tree] class GiniAggregatorSingle private (stats: Array[Double])
       throw new IllegalArgumentException(s"GiniAggregatorSingle given label $label" +
         s" but requires label < numClasses (= $statsSize).")
     }
+    // impurity = 1 - (1/(count + instanceWeight)^2 * (count^2 * (1 - impurity) + 2*stats(label.toInt)*instanceWeight + instanceWeight^2))
+    var calc = count*count*(1 - impurity) + 2*stats(label.toInt)*instanceWeight + instanceWeight*instanceWeight
+    calc /= (count + instanceWeight)*(count + instanceWeight)
+    impurity = 1 - calc
+    if (impurity.isNaN) impurity = 1.0
+    // update stats and total count
     stats(label.toInt) += instanceWeight
+    count += instanceWeight
     this
   }
 
+  private def setCount(_count: Double) = { count = _count; this }
+
+  private def setImpurity(_impurity: Double) = { impurity = _impurity; this }
+
   def getCalculator: GiniCalculator = new GiniCalculator(stats)
 
-  override def deepCopy(): ImpurityAggregatorSingle = new GiniAggregatorSingle(stats.clone())
+  def calculate(): Double = impurity
 
-  override def getCount: Double = stats.sum
+  override def deepCopy(): ImpurityAggregatorSingle = {
+    new GiniAggregatorSingle(stats.clone()).setCount(count).setImpurity(impurity)
+  }
+
+  override def getCount: Double = count
 }
 
 /**
@@ -155,4 +179,6 @@ private[tree] class VarianceAggregatorSingle
   }
 
   override def getCount: Double = stats(0)
+
+  override def calculate(): Double = getCalculator.calculate()
 }

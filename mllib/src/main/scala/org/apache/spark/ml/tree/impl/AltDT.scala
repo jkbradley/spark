@@ -485,7 +485,7 @@ private[ml] object AltDT extends Logging {
       Range(0, featureArity).map { case featureValue =>
         val categoryStats = aggStats(featureValue)
         val centroid = if (categoryStats.getCount != 0) {
-          categoryStats.getCalculator.calculate()
+          categoryStats.calculate()
         } else {
           Double.MaxValue
         }
@@ -621,11 +621,11 @@ private[ml] object AltDT extends Logging {
     val leftImpurityAgg = metadata.createImpurityAggregator()
     val fullImpurityAgg = metadata.createImpurityAggregator()
     aggStats.foreach(fullImpurityAgg.add)
-    val fullImpurity = fullImpurityAgg.getCalculator.calculate()
+    val fullImpurity = fullImpurityAgg.calculate()
 
     if (featureArity == 1) {
       // All instances go right
-      val impurityStats = new ImpurityStats(0.0, fullImpurityAgg.getCalculator.calculate(),
+      val impurityStats = new ImpurityStats(0.0, fullImpurityAgg.calculate(),
         fullImpurityAgg.getCalculator, leftImpurityAgg.getCalculator,
         fullImpurityAgg.getCalculator)
       (None, impurityStats)
@@ -648,8 +648,8 @@ private[ml] object AltDT extends Logging {
         // Compute impurity
         val leftWeight = leftCount / fullCount
         val rightWeight = rightCount / fullCount
-        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
-        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val leftImpurity = leftImpurityAgg.calculate()
+        val rightImpurity = rightImpurityAgg.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestSplit = Some(split)
@@ -700,7 +700,7 @@ private[ml] object AltDT extends Logging {
     var bestThreshold: Double = Double.NegativeInfinity
     val bestLeftImpurityAgg = leftImpurityAgg.deepCopy()
     var bestGain: Double = 0.0
-    val fullImpurity = rightImpurityAgg.getCalculator.calculate()
+    val fullImpurity = rightImpurityAgg.calculate()
     var leftCount: Double = 0.0
     var rightCount: Double = rightImpurityAgg.getCount
     val fullCount: Double = rightCount
@@ -713,8 +713,8 @@ private[ml] object AltDT extends Logging {
         // Check gain
         val leftWeight = leftCount / fullCount
         val rightWeight = rightCount / fullCount
-        val leftImpurity = leftImpurityAgg.getCalculator.calculate()
-        val rightImpurity = rightImpurityAgg.getCalculator.calculate()
+        val leftImpurity = leftImpurityAgg.calculate()
+        val rightImpurity = rightImpurityAgg.calculate()
         val gain = fullImpurity - leftWeight * leftImpurity - rightWeight * rightImpurity
         if (leftCount != 0 && rightCount != 0 && gain > bestGain && gain > metadata.minInfoGain) {
           bestThreshold = currentThreshold
