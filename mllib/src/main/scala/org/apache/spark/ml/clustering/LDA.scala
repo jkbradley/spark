@@ -74,16 +74,16 @@ private[clustering] trait LDAParams extends Params with HasFeaturesCol with HasM
    * (default = automatic)
    *
    * Optimizer-specific parameter settings:
-   * - EM
-   * - Currently only supports symmetric distributions, so all values in the vector should be
-   * the same.
-   * - Values should be > 1.0
-   * - default = uniformly (50 / k) + 1, where 50/k is common in LDA libraries and +1 follows
-   * from Asuncion et al. (2009), who recommend a +1 adjustment for EM.
-   * - Online
-   * - Values should be >= 0
-   * - default = uniformly (1.0 / k), following the implementation from
-   * [[https://github.com/Blei-Lab/onlineldavb]].
+   *  - EM
+   *     - Currently only supports symmetric distributions, so all values in the vector should be
+   *       the same.
+   *     - Values should be > 1.0
+   *     - default = uniformly (50 / k) + 1, where 50/k is common in LDA libraries and +1 follows
+   *       from Asuncion et al. (2009), who recommend a +1 adjustment for EM.
+   *  - Online
+   *     - Values should be >= 0
+   *     - default = uniformly (1.0 / k), following the implementation from
+   *       [[https://github.com/Blei-Lab/onlineldavb]].
    *
    * @group param
    */
@@ -118,14 +118,14 @@ private[clustering] trait LDAParams extends Params with HasFeaturesCol with HasM
    * (default = automatic)
    *
    * Optimizer-specific parameter settings:
-   * - EM
-   * - Value should be > 1.0
-   * - default = 0.1 + 1, where 0.1 gives a small amount of smoothing and +1 follows
-   * Asuncion et al. (2009), who recommend a +1 adjustment for EM.
-   * - Online
-   * - Value should be >= 0
-   * - default = (1.0 / k), following the implementation from
-   * [[https://github.com/Blei-Lab/onlineldavb]].
+   *  - EM
+   *     - Value should be > 1.0
+   *     - default = 0.1 + 1, where 0.1 gives a small amount of smoothing and +1 follows
+   *       Asuncion et al. (2009), who recommend a +1 adjustment for EM.
+   *  - Online
+   *     - Value should be >= 0
+   *     - default = (1.0 / k), following the implementation from
+   *       [[https://github.com/Blei-Lab/onlineldavb]].
    *
    * @group param
    */
@@ -154,18 +154,18 @@ private[clustering] trait LDAParams extends Params with HasFeaturesCol with HasM
   /**
    * Optimizer or inference algorithm used to estimate the LDA model.
    * Currently supported (case-insensitive):
-   * - "online": Online Variational Bayes (default)
-   * - "em": Expectation-Maximization
+   *  - "online": Online Variational Bayes (default)
+   *  - "em": Expectation-Maximization
    *
    * For details, see the following papers:
-   * - Online LDA:
-   * Hoffman, Blei and Bach.  "Online Learning for Latent Dirichlet Allocation."
-   * Neural Information Processing Systems, 2010.
-   * [[http://www.cs.columbia.edu/~blei/papers/HoffmanBleiBach2010b.pdf]]
-   * - EM:
-   * Asuncion et al.  "On Smoothing and Inference for Topic Models."
-   * Uncertainty in Artificial Intelligence, 2009.
-   * [[http://arxiv.org/pdf/1205.2662.pdf]]
+   *  - Online LDA:
+   *     Hoffman, Blei and Bach.  "Online Learning for Latent Dirichlet Allocation."
+   *     Neural Information Processing Systems, 2010.
+   *     [[http://www.cs.columbia.edu/~blei/papers/HoffmanBleiBach2010b.pdf]]
+   *  - EM:
+   *     Asuncion et al.  "On Smoothing and Inference for Topic Models."
+   *     Uncertainty in Artificial Intelligence, 2009.
+   *     [[http://arxiv.org/pdf/1205.2662.pdf]]
    *
    * @group param
    */
@@ -241,15 +241,15 @@ private[clustering] trait LDAParams extends Params with HasFeaturesCol with HasM
   /**
    * For Online optimizer only: [[optimizer]] = "online".
    *
-   * Fraction of the corpus to be sampled and used in each iteration of mini-batch
-   * gradient descent, in range (0, 1].
+   * Fraction of the corpus to be sampled and used in each iteration of mini-batch gradient descent,
+   * in range (0, 1].
    *
    * Note that this should be adjusted in synch with [[LDA.maxIter]]
    * so the entire corpus is used.  Specifically, set both so that
    * maxIterations * miniBatchFraction >= 1.
    *
    * Note: This is the same as the `miniBatchFraction` parameter in
-   * [[org.apache.spark.mllib.clustering.OnlineLDAOptimizer]].
+   *       [[org.apache.spark.mllib.clustering.OnlineLDAOptimizer]].
    *
    * Default: 0.05, i.e., 5% of total documents.
    *
@@ -567,7 +567,6 @@ class LocalLDAModel private[ml] (
 
   @Since("1.6.0")
   override def write: MLWriter = new LocalLDAModel.LocalLDAModelWriter(this)
-
 }
 
 @Since("1.6.0")
@@ -587,11 +586,11 @@ object LocalLDAModel extends MLReadable[LocalLDAModel] {
   }
 
   private case class Data(
-                          vocabSize: Int,
-                          topicsMatrix: Matrix,
-                          docConcentration: Vector,
-                          topicConcentration: Double,
-                          gammaShape: Double)
+      vocabSize: Int,
+      topicsMatrix: Matrix,
+      docConcentration: Vector,
+      topicConcentration: Double,
+      gammaShape: Double)
 
   private class LocalLDAModelReader extends MLReader[LocalLDAModel] {
 
@@ -783,7 +782,6 @@ object DistributedLDAModel extends MLReadable[DistributedLDAModel] {
     }
   }
 
-
   @Since("1.6.0")
   override def read: MLReader[DistributedLDAModel] = new DistributedLDAModelReader
 
@@ -964,7 +962,6 @@ object LDA extends DefaultParamsReadable[LDA] {
       model
     }
   }
-
 
   @Since("2.0.0")
   override def load(path: String): LDA = super.load(path)
