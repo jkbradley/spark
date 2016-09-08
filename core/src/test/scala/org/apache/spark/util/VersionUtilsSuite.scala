@@ -15,13 +15,13 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ml.util
+package org.apache.spark.util
 
 import org.apache.spark.SparkFunSuite
 
-class SparkVersionUtilsSuite extends SparkFunSuite {
+class VersionUtilsSuite extends SparkFunSuite {
 
-  import SparkVersionUtils._
+  import org.apache.spark.util.VersionUtils._
 
   test("Parse Spark major version") {
     assert(majorVersion("2.0") === 2)

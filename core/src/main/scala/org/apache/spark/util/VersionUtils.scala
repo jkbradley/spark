@@ -15,12 +15,12 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ml.util
+package org.apache.spark.util
 
 /**
  * Utilities for working with Spark version strings
  */
-private[ml] object SparkVersionUtils {
+private[spark] object VersionUtils {
 
   private val majorMinorRegex = """^(\d+)\.(\d+)(\..*)?$""".r
 
