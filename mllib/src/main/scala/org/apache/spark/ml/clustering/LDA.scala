@@ -115,7 +115,7 @@ private[clustering] trait LDAParams extends Params with HasFeaturesCol with HasM
    * by Blei et al., but are called "phi" in many later papers such as Asuncion et al., 2009.
    *
    * If not set by the user, then topicConcentration is set automatically.
-   * (default = automatic)
+   *  (default = automatic)
    *
    * Optimizer-specific parameter settings:
    *  - EM
@@ -569,6 +569,7 @@ class LocalLDAModel private[ml] (
   override def write: MLWriter = new LocalLDAModel.LocalLDAModelWriter(this)
 }
 
+
 @Since("1.6.0")
 object LocalLDAModel extends MLReadable[LocalLDAModel] {
 
@@ -599,9 +600,7 @@ object LocalLDAModel extends MLReadable[LocalLDAModel] {
     override def load(path: String): LocalLDAModel = {
       // Import implicits for Dataset Encoder
       val sparkSession = super.sparkSession
-      import sparkSession.implicits._
-      // Pattern to determine sparkversion
-      val versionRegex = """\\d+.\\d+(.\\d+)?(-SNAPSHOT)?""".r
+      // TODO: ???  import sparkSession.implicits._
 
       val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
       val dataPath = new Path(path, "data").toString
@@ -614,10 +613,10 @@ object LocalLDAModel extends MLReadable[LocalLDAModel] {
       val oldModel = new OldLocalLDAModel(topicsMatrix, docConcentration, topicConcentration,
         gammaShape)
       val model = new LocalLDAModel(metadata.uid, vocabSize, oldModel, sparkSession)
-      metadata.sparkVersion match {
-        case "1.6" =>
+      SparkVersionUtils.majorMinorVersion(metadata.sparkVersion) match {
+        case (1, 6) =>
           model.extractTopicDistributionCol(metadata, model)
-        case versionRegex =>
+        case _ =>  // 2.0+
           DefaultParamsReader.getAndSetParams(model, metadata)
       }
       model
@@ -762,20 +761,15 @@ object DistributedLDAModel extends MLReadable[DistributedLDAModel] {
     private val className = classOf[DistributedLDAModel].getName
 
     override def load(path: String): DistributedLDAModel = {
-
-      // Pattern to determine sparkversion
-      val pattern =
-        """\\d+.\\d+(.\\d+)?(-SNAPSHOT)?""".r
-
       val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
       val modelPath = new Path(path, "oldModel").toString
       val oldModel = OldDistributedLDAModel.load(sc, modelPath)
       val model = new DistributedLDAModel(metadata.uid, oldModel.vocabSize,
         oldModel, sparkSession, None)
-      metadata.sparkVersion match {
-        case "1.6" =>
+      SparkVersionUtils.majorMinorVersion(metadata.sparkVersion) match {
+        case (1, 6) =>
           model.extractTopicDistributionCol(metadata, model)
-        case pattern =>
+        case _ =>
           DefaultParamsReader.getAndSetParams(model, metadata)
       }
       model
@@ -922,7 +916,6 @@ class LDA @Since("1.6.0") (
   override def transformSchema(schema: StructType): StructType = {
     validateAndTransformSchema(schema)
   }
-
 }
 
 @Since("2.0.0")
@@ -946,17 +939,12 @@ object LDA extends DefaultParamsReadable[LDA] {
     private val className = classOf[LDA].getName
 
     override def load(path: String): LDA = {
-
-      // Pattern to determine sparkversion
-      val pattern =
-        """\\d+.\\d+(.\\d+)?(-SNAPSHOT)?""".r
-
       val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
       val model = new LDA(metadata.uid)
-      metadata.sparkVersion match {
-        case "1.6" =>
+      SparkVersionUtils.majorMinorVersion(metadata.sparkVersion) match {
+        case (1, 6) =>
           model.extractTopicDistributionCol(metadata, model)
-        case pattern =>
+        case _ =>
           DefaultParamsReader.getAndSetParams(model, metadata)
       }
       model
