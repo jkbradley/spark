@@ -18,6 +18,10 @@
 package org.apache.spark.ml.util
 
 import java.io.{File, IOException}
+import java.nio.file.Paths
+
+import scala.reflect.ClassTag
+import scala.reflect.runtime.universe.TypeTag
 
 import org.scalatest.Suite
 
@@ -25,7 +29,9 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.{Estimator, Model}
 import org.apache.spark.ml.param._
 import org.apache.spark.mllib.util.MLlibTestSparkContext
-import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.util.VersionUtils
+
 
 trait DefaultReadWriteTest extends TempDirectory { self: Suite =>
 
@@ -95,8 +101,8 @@ trait DefaultReadWriteTest extends TempDirectory { self: Suite =>
    * @tparam E  Type of [[Estimator]]
    * @tparam M  Type of [[Model]] produced by estimator
    */
-  def testEstimatorAndModelReadWrite[
-    E <: Estimator[M] with MLWritable, M <: Model[M] with MLWritable](
+  def testEstimatorAndModelReadWrite[E <: Estimator[M] with MLWritable,
+                                     M <: Model[M] with MLWritable](
       estimator: E,
       dataset: Dataset[_],
       testParams: Map[String, Any],
@@ -122,6 +128,47 @@ trait DefaultReadWriteTest extends TempDirectory { self: Suite =>
     }
 
     checkModelData(model, model2)
+  }
+}
+
+abstract class DefaultReadWriteTest2
+  [E <: Estimator[M] with MLWritable : ClassTag, M <: Model[M] with MLWritable : ClassTag](
+    implicit tagE: ClassTag[E], tagM: ClassTag[M])
+  extends DefaultEstimatorTest[E] with DefaultReadWriteTest { self: Suite =>
+
+  private val classOfE = tagE.getClass  // classOf[E]
+  private val classOfM = tagM.getClass  // classOf[E]
+
+  def checkModelDataEqual(model: M, model2: M): Unit
+
+  test("read/write") {
+    val estimator = getDefaultEstimator
+    val dataset = getDefaultDataset
+    testEstimatorAndModelReadWrite(estimator, dataset, allParamSettings, checkModelDataEqual)
+  }
+
+  def generateGoldenInstances(session: SparkSession): Unit = {
+    println(classOfE)
+    println(classOfE.getCanonicalName)
+    val estimatorName = classOfE.getCanonicalName.replaceFirst("org.apache.spark.ml.", "")
+    val modelName = classOfM.getCanonicalName.replaceFirst("org.apache.spark.ml.", "")
+    val baseDir = Paths.get("src", "test", "resources", "persistence",
+      VersionUtils.majorVersion(session.version) + "." + VersionUtils.minorVersion(session.version))
+      .toString
+    val estimatorPath = Paths.get(baseDir, estimatorName).toString
+    val modelPath = Paths.get(baseDir, estimatorName).toString
+
+    // Save Estimator with non-default values
+    val estimator = getDefaultEstimator
+    allParamSettings.foreach { case (paramName: String, value: Any) =>
+      val param = estimator.getParam(paramName)
+      estimator.set(param, value)
+    }
+    estimator.write.session(session).save(estimatorPath)
+
+    // Save Model
+    val model = estimator.fit(getDefaultDataset)
+    model.write.session(session).save(modelPath)
   }
 }
 

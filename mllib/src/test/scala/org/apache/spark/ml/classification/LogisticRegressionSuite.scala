@@ -27,19 +27,38 @@ import org.apache.spark.ml.classification.LogisticRegressionSuite._
 import org.apache.spark.ml.feature.{Instance, LabeledPoint}
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.ParamsSuite
-import org.apache.spark.ml.util.{DefaultReadWriteTest, MLTestingUtils}
+import org.apache.spark.ml.util.{DefaultReadWriteTest2, MLTestingUtils}
 import org.apache.spark.ml.util.TestingUtils._
 import org.apache.spark.mllib.util.MLlibTestSparkContext
-import org.apache.spark.sql.{DataFrame, Dataset, Row}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions.{col, lit}
 import org.apache.spark.sql.types.LongType
 
 class LogisticRegressionSuite
-  extends SparkFunSuite with MLlibTestSparkContext with DefaultReadWriteTest {
+  extends DefaultReadWriteTest2[LogisticRegression, LogisticRegressionModel]
+    with MLlibTestSparkContext {
 
   @transient var dataset: Dataset[_] = _
   @transient var binaryDataset: DataFrame = _
   private val eps: Double = 1e-5
+
+  override def getDefaultDataset: Dataset[_] = {
+    assert(dataset != null, "Error in unit test: dataset should not be used before initialization")
+    dataset
+  }
+
+  override def getDefaultEstimator: LogisticRegression = new LogisticRegression
+
+  override def allParamSettings: Map[String, Any] = LogisticRegressionSuite.allParamSettings
+
+  override def checkModelDataEqual(
+      model: LogisticRegressionModel,
+      model2: LogisticRegressionModel): Unit = {
+    assert(model.intercept === model2.intercept)
+    assert(model.coefficients.toArray === model2.coefficients.toArray)
+    assert(model.numClasses === model2.numClasses)
+    assert(model.numFeatures === model2.numFeatures)
+  }
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -944,16 +963,8 @@ class LogisticRegressionSuite
     assert(allOneNoInterceptModel.summary.totalIterations > 0)
   }
 
-  test("read/write") {
-    def checkModelData(model: LogisticRegressionModel, model2: LogisticRegressionModel): Unit = {
-      assert(model.intercept === model2.intercept)
-      assert(model.coefficients.toArray === model2.coefficients.toArray)
-      assert(model.numClasses === model2.numClasses)
-      assert(model.numFeatures === model2.numFeatures)
-    }
-    val lr = new LogisticRegression()
-    testEstimatorAndModelReadWrite(lr, dataset, LogisticRegressionSuite.allParamSettings,
-      checkModelData)
+  test("read/write backwards compatibility: golden instance generation") {
+    generateGoldenInstances(spark)
   }
 
   test("should support all NumericType labels and not support other types") {
