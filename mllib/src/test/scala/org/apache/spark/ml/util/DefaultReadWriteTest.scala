@@ -20,8 +20,7 @@ package org.apache.spark.ml.util
 import java.io.{File, IOException}
 import java.nio.file.Paths
 
-import scala.reflect.ClassTag
-import scala.reflect.runtime.universe.TypeTag
+import scala.reflect.runtime.universe._
 
 import org.scalatest.Suite
 
@@ -132,43 +131,118 @@ trait DefaultReadWriteTest extends TempDirectory { self: Suite =>
 }
 
 abstract class DefaultReadWriteTest2
-  [E <: Estimator[M] with MLWritable : ClassTag, M <: Model[M] with MLWritable : ClassTag](
-    implicit tagE: ClassTag[E], tagM: ClassTag[M])
-  extends DefaultEstimatorTest[E] with DefaultReadWriteTest { self: Suite =>
+  [E <: Estimator[M] with MLWritable : TypeTag, M <: Model[M] with MLWritable : TypeTag]
+  // (implicit val tagE: ClassTag[E], implicit val tagM: ClassTag[M])
+  extends DefaultEstimatorTest[E, M] with TempDirectory { self: Suite =>
 
-  private val classOfE = tagE.getClass  // classOf[E]
-  private val classOfM = tagM.getClass  // classOf[E]
+  // Copied from SQL ScalaReflection
+  private def getClassNameFromType(tpe: `Type`): String = {
+    tpe.erasure.typeSymbol.asClass.fullName
+  }
+
+  private val classOfE = getClassNameFromType(typeOf[E])
+  private val classOfM = getClassNameFromType(typeOf[M])
+  private val estimatorName = classOfE.replaceFirst("org.apache.spark.ml.", "")
+  private val modelName = classOfM.replaceFirst("org.apache.spark.ml.", "")
 
   def checkModelDataEqual(model: M, model2: M): Unit
 
   test("read/write") {
-    val estimator = getDefaultEstimator
-    val dataset = getDefaultDataset
-    testEstimatorAndModelReadWrite(estimator, dataset, allParamSettings, checkModelDataEqual)
+    testEstimatorAndModelReadWrite(getDefaultEstimator, getDefaultModel, allParamSettings,
+      checkModelDataEqual)
   }
 
-  def generateGoldenInstances(session: SparkSession): Unit = {
-    println(classOfE)
-    println(classOfE.getCanonicalName)
-    val estimatorName = classOfE.getCanonicalName.replaceFirst("org.apache.spark.ml.", "")
-    val modelName = classOfM.getCanonicalName.replaceFirst("org.apache.spark.ml.", "")
-    val baseDir = Paths.get("src", "test", "resources", "persistence",
-      VersionUtils.majorVersion(session.version) + "." + VersionUtils.minorVersion(session.version))
+  protected def getBaseDir(majorVersion: Int, minorVersion: Int): String = {
+    Paths.get("src", "test", "resources", "persistence", majorVersion + "." + minorVersion)
       .toString
-    val estimatorPath = Paths.get(baseDir, estimatorName).toString
-    val modelPath = Paths.get(baseDir, estimatorName).toString
+  }
 
-    // Save Estimator with non-default values
+  protected def getEstimatorPath(majorVersion: Int, minorVersion: Int): String = {
+    Paths.get(getBaseDir(majorVersion, minorVersion), estimatorName).toString
+  }
+
+  protected def getModelPath(majorVersion: Int, minorVersion: Int): String = {
+    Paths.get(getBaseDir(majorVersion, minorVersion), modelName).toString
+  }
+
+  protected def buildGoldenEstimator(): E = {
     val estimator = getDefaultEstimator
     allParamSettings.foreach { case (paramName: String, value: Any) =>
       val param = estimator.getParam(paramName)
       estimator.set(param, value)
     }
-    estimator.write.session(session).save(estimatorPath)
+    estimator
+  }
+
+  protected def buildGoldenModel(goldenEstimator: E): M = {
+    val model = getDefaultModel
+    allParamSettings.foreach { case (paramName: String, value: Any) =>
+      val param = model.getParam(paramName)
+      model.set(param, value)
+    }
+    model
+  }
+
+  def generateGoldenInstances(session: SparkSession): Unit = {
+    val majorVersion = VersionUtils.majorVersion(session.version)
+    val minorVersion = VersionUtils.minorVersion(session.version)
+
+    val estimatorPath = getEstimatorPath(majorVersion, minorVersion)
+    val modelPath = getModelPath(majorVersion, minorVersion)
+
+    // Save Estimator with non-default values
+    val estimator = buildGoldenEstimator()
+    estimator.write.session(session).overwrite().save(estimatorPath)
 
     // Save Model
     val model = estimator.fit(getDefaultDataset)
-    model.write.session(session).save(modelPath)
+    model.write.session(session).overwrite().save(modelPath)
+  }
+
+  /**
+   * Default test for Estimator, Model pairs:
+   *  - Explicitly set Params, and train model
+   *  - Test save/load using [[testDefaultReadWrite()]] on Estimator and Model
+   *  - Check Params on Estimator and Model
+   *  - Compare model data
+   *
+   * This requires that the [[Estimator]] and [[Model]] share the same set of [[Param]]s.
+   *
+   * @param estimator  Estimator to test
+   * @param dataset  Dataset to pass to [[Estimator.fit()]]
+   * @param testParams  Set of [[Param]] values to set in estimator
+   * @param checkModelData  Method which takes the original and loaded [[Model]] and compares their
+   *                        data.  This method does not need to check [[Param]] values.
+   * @tparam E  Type of [[Estimator]]
+   * @tparam M  Type of [[Model]] produced by estimator
+   */
+  def testEstimatorAndModelReadWrite[E <: Estimator[M] with MLWritable,
+    M <: Model[M] with MLWritable](
+      estimator: E,
+      model: M,
+      testParams: Map[String, Any],
+      checkModelData: (M, M) => Unit): Unit = {
+    // Set some Params to make sure set Params are serialized.
+    testParams.foreach { case (p, v) =>
+      estimator.set(estimator.getParam(p), v)
+    }
+    val model = estimator.fit(dataset)
+
+    // Test Estimator save/load
+    val estimator2 = testDefaultReadWrite(estimator)
+    testParams.foreach { case (p, v) =>
+      val param = estimator.getParam(p)
+      assert(estimator.get(param).get === estimator2.get(param).get)
+    }
+
+    // Test Model save/load
+    val model2 = testDefaultReadWrite(model)
+    testParams.foreach { case (p, v) =>
+      val param = model.getParam(p)
+      assert(model.get(param).get === model2.get(param).get)
+    }
+
+    checkModelData(model, model2)
   }
 }
 

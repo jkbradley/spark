@@ -47,7 +47,7 @@ class LogisticRegressionSuite
     dataset
   }
 
-  override def getDefaultEstimator: LogisticRegression = new LogisticRegression
+  override def getDefaultEstimator: LogisticRegression = new LogisticRegression(uid = "myUID")
 
   override def allParamSettings: Map[String, Any] = LogisticRegressionSuite.allParamSettings
 
@@ -118,6 +118,7 @@ class LogisticRegressionSuite
     assert(model.hasParent)
   }
 
+  /*
   test("empty probabilityCol") {
     val lr = new LogisticRegression().setProbabilityCol("")
     val model = lr.fit(dataset)
@@ -963,10 +964,6 @@ class LogisticRegressionSuite
     assert(allOneNoInterceptModel.summary.totalIterations > 0)
   }
 
-  test("read/write backwards compatibility: golden instance generation") {
-    generateGoldenInstances(spark)
-  }
-
   test("should support all NumericType labels and not support other types") {
     val lr = new LogisticRegression().setMaxIter(1)
     MLTestingUtils.checkNumericTypes[LogisticRegressionModel, LogisticRegression](
@@ -974,6 +971,18 @@ class LogisticRegressionSuite
         assert(expected.intercept === actual.intercept)
         assert(expected.coefficients.toArray === actual.coefficients.toArray)
       }
+  }
+  */
+
+  ignore("read/write backwards compatibility: golden instance generation") {
+    generateGoldenInstances(spark)
+  }
+
+  test("read/write backwards compatibility: load version 2.0") {
+    val loadedEstimator = LogisticRegression.read.session(spark).load(getEstimatorPath(2, 0))
+    val loadedModel = LogisticRegressionModel.read.session(spark).load(getModelPath(2, 0))
+    val goldenEstimator = buildGoldenEstimator()
+    val goldenModel = buildGoldenModel()
   }
 }
 

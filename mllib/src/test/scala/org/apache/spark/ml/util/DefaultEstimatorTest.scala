@@ -26,18 +26,28 @@ import org.apache.spark.sql.Dataset
  *
  * The companion objects of test suites for [[Estimator]] types should implement this trait.
  */
-abstract class DefaultEstimatorTest[E <: Estimator[_ <: Model[_] with MLWritable] with MLWritable]
+abstract class DefaultEstimatorTest
+  [E <: Estimator[M] with MLWritable, M <: Model[M] with MLWritable]
   extends DefaultParamsTest[E] {
 
-  def getDefaultDataset: Dataset[_]
-
+  /**
+   * Get default Estimator instance.
+   * This MUST set the UID to a fixed value, rather than using a random UID.
+   */
   def getDefaultEstimator: E
+
+  /**
+   * Get default Model instance.
+   * This MUST set the UID to the same fixed value as [[getDefaultEstimator]].
+   */
+  def getDefaultModel: M
 
   override def getDefaultInstance: E = getDefaultEstimator
 
   test("Estimator: default check") {
     val estimator = getDefaultEstimator
-    val model = estimator.fit(getDefaultDataset)
+    ParamsSuite.checkParams(estimator)
+    val model = getDefaultModel
     ParamsSuite.checkParams(model)
   }
 
