@@ -21,15 +21,18 @@ import scala.beans.BeanInfo
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.param.ParamsSuite
-import org.apache.spark.ml.util.DefaultReadWriteTest
+import org.apache.spark.ml.util.{DefaultParamsTestable, DefaultReadWriteTest}
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.sql.{Dataset, Row}
 
 @BeanInfo
 case class TokenizerTestData(rawText: String, wantedTokens: Array[String])
 
-class TokenizerSuite extends SparkFunSuite with MLlibTestSparkContext with DefaultReadWriteTest {
+class TokenizerSuite extends DefaultParamsTestable with MLlibTestSparkContext {
 
+  override def allParamSettings: Map[String, Any] = Map("outputCol" -> "myOutputCol")
+
+  /*
   test("params") {
     ParamsSuite.checkParams(new Tokenizer)
   }
@@ -40,6 +43,7 @@ class TokenizerSuite extends SparkFunSuite with MLlibTestSparkContext with Defau
       .setOutputCol("myOutputCol")
     testDefaultReadWrite(t)
   }
+  */
 }
 
 class RegexTokenizerSuite

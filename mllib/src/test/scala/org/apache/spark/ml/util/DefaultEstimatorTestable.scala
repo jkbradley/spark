@@ -26,9 +26,9 @@ import org.apache.spark.sql.Dataset
  *
  * The companion objects of test suites for [[Estimator]] types should implement this trait.
  */
-abstract class DefaultEstimatorTest
+abstract class DefaultEstimatorTestable
   [E <: Estimator[M] with MLWritable, M <: Model[M] with MLWritable]
-  extends DefaultParamsTest[E] {
+  extends DefaultParamsTestable[E] {
 
   /**
    * Get default Estimator instance.
