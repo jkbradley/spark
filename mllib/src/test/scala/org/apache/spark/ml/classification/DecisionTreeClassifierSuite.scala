@@ -372,7 +372,6 @@ class DecisionTreeClassifierSuite
   test("training with sample weights") {
     val df = linearMulticlassDataset
     val numClasses = 3
-    val predEquals = (x: Double, y: Double) => x == y
     // (impurity, maxDepth)
     val testParams = Seq(
       ("gini", 10),
@@ -388,14 +387,14 @@ class DecisionTreeClassifierSuite
 
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
-        MLTestingUtils.modelPredictionEquals(df, predEquals, 0.9))
+        MLTestingUtils.modelPredictionEquals(df, 0.0, 0.9))
       MLTestingUtils.testOutliersWithSmallWeights[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
-        numClasses, MLTestingUtils.modelPredictionEquals(df, predEquals, 0.8),
+        numClasses, MLTestingUtils.modelPredictionEquals(df, 0.0, 0.8),
         outlierRatio = 2)
       MLTestingUtils.testOversamplingVsWeighting[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
-        MLTestingUtils.modelPredictionEquals(df, predEquals, 1.0), seed)
+        MLTestingUtils.modelPredictionEquals(df, 0.0, 1.0), seed)
     }
   }
 

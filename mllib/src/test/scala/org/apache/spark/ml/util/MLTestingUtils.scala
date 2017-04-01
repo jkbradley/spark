@@ -26,6 +26,7 @@ import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.param.shared.HasWeightCol
 import org.apache.spark.ml.recommendation.{ALS, ALSModel}
 import org.apache.spark.ml.tree.impl.TreeTests
+import org.apache.spark.ml.util.TestingUtils._
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
@@ -296,7 +297,7 @@ object MLTestingUtils extends SparkFunSuite {
 
   def modelPredictionEquals[M <: PredictionModel[_, M]](
       data: DataFrame,
-      compareFunc: (Double, Double) => Boolean,
+      predictionRelativeError: Double,
       fractionInTol: Double)(
       model1: M,
       model2: M): Unit = {
@@ -305,7 +306,7 @@ object MLTestingUtils extends SparkFunSuite {
     val inTol = pred1.zip(pred2).count { case (p1, p2) =>
       val x = p1.getDouble(0)
       val y = p2.getDouble(0)
-      compareFunc(x, y)
+      x ~== y relTol predictionRelativeError
     }
     assert(inTol / pred1.length.toDouble >= fractionInTol)
   }
