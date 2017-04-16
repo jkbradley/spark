@@ -18,6 +18,7 @@
 package org.apache.spark.ml.util
 
 import org.apache.spark.SparkFunSuite
+import org.apache.spark.internal.Logging
 import org.apache.spark.ml._
 import org.apache.spark.ml.evaluation.Evaluator
 import org.apache.spark.ml.feature.{Instance, LabeledPoint}
@@ -276,6 +277,9 @@ object MLTestingUtils extends SparkFunSuite {
     val trueModel = estimator.set(estimator.weightCol, "").fit(data)
     val outlierModel = estimator.set(estimator.weightCol, "weight")
       .fit(outlierDS)
+    Seq(trueModel, outlierModel)
+      .foreach(t =>
+        println(t.asInstanceOf[org.apache.spark.ml.tree.DecisionTreeModel].toDebugString))
     modelEquals(trueModel, outlierModel)
   }
 

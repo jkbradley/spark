@@ -437,7 +437,7 @@ class DecisionTreeClassifierSuite
        "ImpurityCalculator builder fails for uppercase impurity type Gini in model read/write") {
     val rdd = TreeTests.getTreeReadWriteData(sc)
     val data: DataFrame =
-      TreeTests.setMetadata(rdd, Map.empty[Int, Int], numClasses = 2)
+      TreeTests.setMetadata(rdd.map(_.toInstance(1.0)), Map.empty[Int, Int], numClasses = 2)
 
     val dt = new DecisionTreeClassifier()
       .setImpurity("Gini")

@@ -53,6 +53,7 @@ class DecisionTreeRegressorSuite
   // Tests calling train()
   /////////////////////////////////////////////////////////////////////////////
 
+  /*
   test("Regression stump with 3-ary (ordered) categorical features") {
     val dt = new DecisionTreeRegressor()
       .setImpurity("variance")
@@ -154,25 +155,30 @@ class DecisionTreeRegressorSuite
         TreeTests.checkEqual(expected, actual)
       }
   }
+  */
 
   test("training with sample weights") {
     val df = linearRegressionData
     val numClasses = 0
-    val testParams = Seq(5, 10)
+    val testParams = Seq(1)  //  Seq(5, 10)
     for (maxDepth <- testParams) {
       val estimator = new DecisionTreeRegressor()
         .setMaxDepth(maxDepth)
-        .setMinWeightFractionPerNode(0.05)
+        // .setMinWeightFractionPerNode(0.05)
+      /*
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, 0.05, 0.9))
+      */
       MLTestingUtils.testOutliersWithSmallWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator, numClasses,
         MLTestingUtils.modelPredictionEquals(df, 0.1, 0.8),
         outlierRatio = 2)
+      /*
       MLTestingUtils.testOversamplingVsWeighting[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, 0.01, 1.0), seed)
+      */
     }
   }
 
@@ -180,6 +186,7 @@ class DecisionTreeRegressorSuite
   // Tests of model save/load
   /////////////////////////////////////////////////////////////////////////////
 
+  /*
   test("read/write") {
     def checkModelData(
         model: DecisionTreeRegressionModel,
@@ -208,6 +215,7 @@ class DecisionTreeRegressorSuite
       TreeTests.allParamSettings ++ Map("maxDepth" -> 0),
       TreeTests.allParamSettings ++ Map("maxDepth" -> 0), checkModelData)
   }
+  */
 }
 
 private[ml] object DecisionTreeRegressorSuite extends SparkFunSuite {

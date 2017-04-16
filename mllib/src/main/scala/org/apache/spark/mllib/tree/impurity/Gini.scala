@@ -80,29 +80,23 @@ object Gini extends Impurity {
  * @param numClasses  Number of classes for label.
  */
 private[spark] class GiniAggregator(numClasses: Int)
-  extends ImpurityAggregator(numClasses + 1) with Serializable {
+  extends ImpurityAggregator(numClasses) with Serializable {
 
   /**
    * Update stats for one (node, feature, bin) with the given label.
    * @param allStats  Flat stats array, with stats for this (node, feature, bin) contiguous.
    * @param offset    Start index of stats for this (node, feature, bin).
    */
-  def update(
-      allStats: Array[Double],
-      offset: Int,
-      label: Double,
-      numSamples: Int,
-      sampleWeight: Double): Unit = {
+  def update(allStats: Array[Double], offset: Int, label: Double, instanceWeight: Double): Unit = {
     if (label >= numClasses) {
       throw new IllegalArgumentException(s"GiniAggregator given label $label" +
-        s" but requires label < numClasses (= ${numClasses}).")
+        s" but requires label < numClasses (= $numClasses).")
     }
     if (label < 0) {
       throw new IllegalArgumentException(s"GiniAggregator given label $label" +
         s"but requires label to be non-negative.")
     }
-    allStats(offset + label.toInt) += numSamples * sampleWeight
-    allStats(offset + statsSize - 1) += numSamples
+    allStats(offset + label.toInt) += instanceWeight
   }
 
   /**
@@ -111,8 +105,7 @@ private[spark] class GiniAggregator(numClasses: Int)
    * @param offset    Start index of stats for this (node, feature, bin).
    */
   def getCalculator(allStats: Array[Double], offset: Int): GiniCalculator = {
-    new GiniCalculator(allStats.view(offset, offset + statsSize - 1).toArray,
-      allStats(offset + statsSize - 1).toLong)
+    new GiniCalculator(allStats.view(offset, offset + statsSize).toArray)
   }
 }
 
@@ -122,36 +115,20 @@ private[spark] class GiniAggregator(numClasses: Int)
  * (node, feature, bin).
  * @param stats  Array of sufficient statistics for a (node, feature, bin).
  */
-private[spark] class GiniCalculator(stats: Array[Double], var rawCount: Long)
-  extends ImpurityCalculator(stats) {
+private[spark] class GiniCalculator(stats: Array[Double]) extends ImpurityCalculator(stats) {
 
-  /**
-   * Make a deep copy of this [[ImpurityCalculator]].
-   */
-  def copy: GiniCalculator = new GiniCalculator(stats.clone(), rawCount)
+  override def copy: GiniCalculator = new GiniCalculator(stats.clone())
 
-  /**
-   * Calculate the impurity from the stored sufficient statistics.
-   */
-  def calculate(): Double = Gini.calculate(stats, stats.sum)
+  override def calculate(): Double = Gini.calculate(stats, stats.sum)
 
-  /**
-   * Weighted number of data points accounted for in the sufficient statistics.
-   */
-  def count: Double = stats.sum
+  override def count: Double = stats.sum
 
-  /**
-   * Prediction which should be made based on the sufficient statistics.
-   */
-  def predict: Double = if (count == 0) {
+  override def predict: Double = if (count == 0) {
     0
   } else {
     indexOfLargestArrayElement(stats)
   }
 
-  /**
-   * Probability of the label given by [[predict]].
-   */
   override def prob(label: Double): Double = {
     val lbl = label.toInt
     require(lbl < stats.length,

@@ -132,7 +132,7 @@ private[spark] object RandomForest extends Logging {
 
     val baggedInput = BaggedPoint
       .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement,
-        (tp: TreePoint) => tp.weight, seed = seed)
+        seed = seed)
       .persist(StorageLevel.MEMORY_AND_DISK)
 
     // depth of the decision tree
@@ -258,16 +258,14 @@ private[spark] object RandomForest extends Logging {
    * @param treePoint Data point being aggregated.
    * @param splits Possible splits indexed (numFeatures)(numSplits)
    * @param unorderedFeatures Set of indices of unordered features.
-   * @param numSamples Number of times this instance occurs in the sample.
-   * @param sampleWeight Weight (importance) of instance in dataset.
+   * @param instanceWeight  Weight (importance) of instance in dataset.
    */
   private def mixedBinSeqOp(
       agg: DTStatsAggregator,
       treePoint: TreePoint,
       splits: Array[Array[Split]],
       unorderedFeatures: Set[Int],
-      numSamples: Int,
-      sampleWeight: Double,
+      instanceWeight: Double,
       featuresForNode: Option[Array[Int]]): Unit = {
     val numFeaturesPerNode = if (featuresForNode.nonEmpty) {
       // Use subsampled features
@@ -294,15 +292,14 @@ private[spark] object RandomForest extends Logging {
         var splitIndex = 0
         while (splitIndex < numSplits) {
           if (featureSplits(splitIndex).shouldGoLeft(featureValue, featureSplits)) {
-            agg.featureUpdate(leftNodeFeatureOffset, splitIndex, treePoint.label, numSamples,
-              sampleWeight)
+            agg.featureUpdate(leftNodeFeatureOffset, splitIndex, treePoint.label, instanceWeight)
           }
           splitIndex += 1
         }
       } else {
         // Ordered feature
         val binIndex = treePoint.binnedFeatures(featureIndex)
-        agg.update(featureIndexIdx, binIndex, treePoint.label, numSamples, sampleWeight)
+        agg.update(featureIndexIdx, binIndex, treePoint.label, instanceWeight)
       }
       featureIndexIdx += 1
     }
@@ -316,14 +313,12 @@ private[spark] object RandomForest extends Logging {
    * @param agg  Array storing aggregate calculation, with a set of sufficient statistics for
    *             each (feature, bin).
    * @param treePoint  Data point being aggregated.
-   * @param numSamples Number of times this instance occurs in the sample.
-   * @param sampleWeight  Weight (importance) of instance in dataset.
+   * @param instanceWeight  Weight (importance) of instance in dataset.
    */
   private def orderedBinSeqOp(
       agg: DTStatsAggregator,
       treePoint: TreePoint,
-      numSamples: Int,
-      sampleWeight: Double,
+      instanceWeight: Double,
       featuresForNode: Option[Array[Int]]): Unit = {
     val label = treePoint.label
 
@@ -333,7 +328,7 @@ private[spark] object RandomForest extends Logging {
       var featureIndexIdx = 0
       while (featureIndexIdx < featuresForNode.get.length) {
         val binIndex = treePoint.binnedFeatures(featuresForNode.get.apply(featureIndexIdx))
-        agg.update(featureIndexIdx, binIndex, label, numSamples, sampleWeight)
+        agg.update(featureIndexIdx, binIndex, label, instanceWeight)
         featureIndexIdx += 1
       }
     } else {
@@ -342,7 +337,7 @@ private[spark] object RandomForest extends Logging {
       var featureIndex = 0
       while (featureIndex < numFeatures) {
         val binIndex = treePoint.binnedFeatures(featureIndex)
-        agg.update(featureIndex, binIndex, label, numSamples, sampleWeight)
+        agg.update(featureIndex, binIndex, label, instanceWeight)
         featureIndex += 1
       }
     }
@@ -431,16 +426,16 @@ private[spark] object RandomForest extends Logging {
       if (nodeInfo != null) {
         val aggNodeIndex = nodeInfo.nodeIndexInGroup
         val featuresForNode = nodeInfo.featureSubset
-        val numSamples = baggedPoint.subsampleCounts(treeIndex)
-        val sampleWeight = baggedPoint.sampleWeight
+        //  val numSamples = baggedPoint.subsampleCounts(treeIndex)
+        //  val sampleWeight = baggedPoint.sampleWeight
+        val instanceWeight = baggedPoint.subsampleWeights(treeIndex)
         if (metadata.unorderedFeatures.isEmpty) {
-          orderedBinSeqOp(agg(aggNodeIndex), baggedPoint.datum, numSamples, sampleWeight,
-            featuresForNode)
+          orderedBinSeqOp(agg(aggNodeIndex), baggedPoint.datum, instanceWeight, featuresForNode)
         } else {
           mixedBinSeqOp(agg(aggNodeIndex), baggedPoint.datum, splits,
-            metadata.unorderedFeatures, numSamples, sampleWeight, featuresForNode)
+            metadata.unorderedFeatures, instanceWeight, featuresForNode)
         }
-        agg(aggNodeIndex).updateParent(baggedPoint.datum.label, numSamples, sampleWeight)
+        agg(aggNodeIndex).updateParent(baggedPoint.datum.label, instanceWeight)
       }
     }
 
@@ -665,15 +660,13 @@ private[spark] object RandomForest extends Logging {
       stats.impurity
     }
 
-    val leftRawCount = leftImpurityCalculator.rawCount
-    val rightRawCount = rightImpurityCalculator.rawCount
     val leftCount = leftImpurityCalculator.count
     val rightCount = rightImpurityCalculator.count
 
     val totalCount = leftCount + rightCount
 
-    val violatesMinInstancesPerNode = (leftRawCount < metadata.minInstancesPerNode) ||
-      (rightRawCount < metadata.minInstancesPerNode)
+    val violatesMinInstancesPerNode = (leftCount < metadata.minInstancesPerNode) ||
+      (rightCount < metadata.minInstancesPerNode)
     val violatesMinWeightPerNode = (leftCount < metadata.minWeightPerNode) ||
       (rightCount < metadata.minWeightPerNode)
     // If left child or right child doesn't satisfy minimum weight per node or minimum

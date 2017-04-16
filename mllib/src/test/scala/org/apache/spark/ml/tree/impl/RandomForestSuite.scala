@@ -569,16 +569,16 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
       left2       parent
                 left  right
      */
-    val leftImp = new GiniCalculator(Array(3.0, 2.0, 1.0), 6L)
+    val leftImp = new GiniCalculator(Array(3.0, 2.0, 1.0))
     val left = new LeafNode(0.0, leftImp.calculate(), leftImp)
 
-    val rightImp = new GiniCalculator(Array(1.0, 2.0, 5.0), 8L)
+    val rightImp = new GiniCalculator(Array(1.0, 2.0, 5.0))
     val right = new LeafNode(2.0, rightImp.calculate(), rightImp)
 
     val parent = TreeTests.buildParentNode(left, right, new ContinuousSplit(0, 0.5))
     val parentImp = parent.impurityStats
 
-    val left2Imp = new GiniCalculator(Array(1.0, 6.0, 1.0), 8L)
+    val left2Imp = new GiniCalculator(Array(1.0, 6.0, 1.0))
     val left2 = new LeafNode(0.0, left2Imp.calculate(), left2Imp)
 
     val grandParent = TreeTests.buildParentNode(left2, parent, new ContinuousSplit(1, 1.0))
