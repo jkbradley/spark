@@ -80,11 +80,10 @@ class Strategy @Since("1.3.0") (
     @Since("1.0.0") @BeanProperty var maxMemoryInMB: Int = 256,
     @Since("1.2.0") @BeanProperty var subsamplingRate: Double = 1,
     @Since("1.2.0") @BeanProperty var useNodeIdCache: Boolean = false,
-    @Since("1.2.0") @BeanProperty var checkpointInterval: Int = 10,
-    private[spark] var minWeightFractionPerNode: Double = 0.0) extends Serializable {
+    @Since("1.2.0") @BeanProperty var checkpointInterval: Int = 10) extends Serializable {
 
-  /**
-   */
+  private[spark] var minWeightFractionPerNode: Double = 0.0
+
   @Since("1.2.0")
   def isMulticlassClassification: Boolean = {
     algo == Classification && numClasses > 2
@@ -94,7 +93,7 @@ class Strategy @Since("1.3.0") (
    */
   @Since("1.2.0")
   def isMulticlassWithCategoricalFeatures: Boolean = {
-    isMulticlassClassification && (categoricalFeaturesInfo.size > 0)
+    isMulticlassClassification && categoricalFeaturesInfo.nonEmpty
   }
 
   /**
@@ -109,8 +108,7 @@ class Strategy @Since("1.3.0") (
       maxBins: Int,
       categoricalFeaturesInfo: java.util.Map[java.lang.Integer, java.lang.Integer]) {
     this(algo, impurity, maxDepth, numClasses, maxBins, Sort,
-      categoricalFeaturesInfo.asInstanceOf[java.util.Map[Int, Int]].asScala.toMap,
-      minWeightFractionPerNode = 0.0)
+      categoricalFeaturesInfo.asInstanceOf[java.util.Map[Int, Int]].asScala.toMap)
   }
 
   /**
@@ -175,7 +173,7 @@ class Strategy @Since("1.3.0") (
     new Strategy(algo, impurity, maxDepth, numClasses, maxBins,
       quantileCalculationStrategy, categoricalFeaturesInfo, minInstancesPerNode,
       minInfoGain, maxMemoryInMB, subsamplingRate, useNodeIdCache,
-      checkpointInterval, minWeightFractionPerNode)
+      checkpointInterval)
   }
 }
 

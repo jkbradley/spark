@@ -66,7 +66,7 @@ private[spark] class DecisionTreeMetadata(
 
   def isMulticlass: Boolean = numClasses > 2
 
-  def isMulticlassWithCategoricalFeatures: Boolean = isMulticlass && (featureArity.size > 0)
+  def isMulticlassWithCategoricalFeatures: Boolean = isMulticlass && featureArity.nonEmpty
 
   def isCategorical(featureIndex: Int): Boolean = featureArity.contains(featureIndex)
 
@@ -122,7 +122,7 @@ private[spark] object DecisionTreeMetadata extends Logging {
     }
     require(numFeatures > 0, s"DecisionTree requires number of features > 0, " +
       s"but was given an empty features vector")
-    val (numExamples, weightSum) = input.aggregate((0L, 0.0))(
+    val (numExamples, weightedNumExamples) = input.aggregate((0L, 0.0))(
       (acc, x) => (acc._1 + 1L, acc._2 + x.weight),
       (acc1, acc2) => (acc1._1 + acc2._1, acc1._2 + acc2._2))
 
@@ -131,7 +131,7 @@ private[spark] object DecisionTreeMetadata extends Logging {
       case Regression => 0
     }
 
-    val maxPossibleBins = math.min(strategy.maxBins, numExamples).toInt
+    val maxPossibleBins = math.min(strategy.maxBins, weightedNumExamples).toInt
     if (maxPossibleBins < strategy.maxBins) {
       logWarning(s"DecisionTree reducing maxBins from ${strategy.maxBins} to $maxPossibleBins" +
         s" (= number of training instances)")
@@ -216,7 +216,7 @@ private[spark] object DecisionTreeMetadata extends Logging {
         }
     }
 
-    new DecisionTreeMetadata(numFeatures, numExamples, weightSum, numClasses,
+    new DecisionTreeMetadata(numFeatures, numExamples, weightedNumExamples, numClasses,
       numBins.max, strategy.categoricalFeaturesInfo, unorderedFeatures.toSet, numBins,
       strategy.impurity, strategy.quantileCalculationStrategy, strategy.maxDepth,
       strategy.minInstancesPerNode, strategy.minWeightFractionPerNode, strategy.minInfoGain,

@@ -22,10 +22,9 @@ import org.json4s.{DefaultFormats, JObject}
 import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Since
-import org.apache.spark.ml.feature.{Instance, LabeledPoint}
+import org.apache.spark.ml.feature.Instance
 import org.apache.spark.ml.linalg.{DenseVector, SparseVector, Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
-import org.apache.spark.ml.param.shared.HasWeightCol
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.{DecisionTreeModel, Node, TreeClassifierParams}
 import org.apache.spark.ml.tree.DecisionTreeModelReadWrite._
@@ -33,7 +32,6 @@ import org.apache.spark.ml.tree.impl.RandomForest
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => OldStrategy}
 import org.apache.spark.mllib.tree.model.{DecisionTreeModel => OldDecisionTreeModel}
-import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.functions.{col, lit}
 import org.apache.spark.sql.types.DoubleType
@@ -140,21 +138,6 @@ class DecisionTreeClassifier @Since("1.4.0") (
 
     val trees = RandomForest.run(instances, strategy, numTrees = 1, featureSubsetStrategy = "all",
       seed = $(seed), instr = Some(instr), parentUID = Some(uid))
-
-    val m = trees.head.asInstanceOf[DecisionTreeClassificationModel]
-    instr.logSuccess(m)
-    m
-  }
-
-  /** (private[ml]) Train a decision tree on an RDD */
-  private[ml] def train(data: RDD[LabeledPoint],
-      oldStrategy: OldStrategy): DecisionTreeClassificationModel = {
-
-    val instances = data.map(_.toInstance(1.0))
-    val instr = Instrumentation.create(this, instances)
-    instr.logParams(params: _*)
-    val trees = RandomForest.run(instances, oldStrategy, numTrees = 1,
-      featureSubsetStrategy = "all", seed = 0L, instr = Some(instr), parentUID = Some(uid))
 
     val m = trees.head.asInstanceOf[DecisionTreeClassificationModel]
     instr.logSuccess(m)

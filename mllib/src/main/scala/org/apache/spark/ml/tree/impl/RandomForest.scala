@@ -131,8 +131,7 @@ private[spark] object RandomForest extends Logging {
     val withReplacement = numTrees > 1
 
     val baggedInput = BaggedPoint
-      .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement,
-        seed = seed)
+      .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement, seed)
       .persist(StorageLevel.MEMORY_AND_DISK)
 
     // depth of the decision tree
@@ -253,11 +252,11 @@ private[spark] object RandomForest extends Logging {
    * For unordered features, bins correspond to subsets of categories; either the left or right bin
    * for each subset is updated.
    *
-   * @param agg Array storing aggregate calculation, with a set of sufficient statistics for
-   *            each (feature, bin).
-   * @param treePoint Data point being aggregated.
-   * @param splits Possible splits indexed (numFeatures)(numSplits)
-   * @param unorderedFeatures Set of indices of unordered features.
+   * @param agg  Array storing aggregate calculation, with a set of sufficient statistics for
+   *             each (feature, bin).
+   * @param treePoint  Data point being aggregated.
+   * @param splits  Possible splits indexed (numFeatures)(numSplits)
+   * @param unorderedFeatures  Set of indices of unordered features.
    * @param instanceWeight  Weight (importance) of instance in dataset.
    */
   private def mixedBinSeqOp(
@@ -901,8 +900,8 @@ private[spark] object RandomForest extends Logging {
     val sampledInput = if (continuousFeatures.nonEmpty) {
       // Calculate the number of samples for approximate quantile calculation.
       val requiredSamples = math.max(metadata.maxBins * metadata.maxBins, 10000)
-      val fraction = if (requiredSamples < metadata.numExamples) {
-        requiredSamples.toDouble / metadata.numExamples
+      val fraction = if (requiredSamples < metadata.weightedNumExamples) {
+        requiredSamples.toDouble / metadata.weightedNumExamples
       } else {
         1.0
       }
