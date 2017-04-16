@@ -159,16 +159,17 @@ class DecisionTreeRegressorSuite
     val df = linearRegressionData
     val numClasses = 0
     val predEquals = (x: Double, y: Double) => x ~== y relTol 0.05
-    val testParams = Seq(1)  //  Seq(5, 10)
+    val testParams = Seq(5, 10)
     for (maxDepth <- testParams) {
       val estimator = new DecisionTreeRegressor()
         .setMaxDepth(maxDepth)
         .setSeed(1234)
-        // .setMinWeightFractionPerNode(0.05)
+        .setMinInstancesPerNode(0)
+      // We set minInstancesPerNode and minWeightFractionPerNode carefully to make the Estimator
+      // invariant to scaling in instance weights.
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 0.9))
-      /*
       MLTestingUtils.testOutliersWithSmallWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator, numClasses,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 0.8),
@@ -176,7 +177,6 @@ class DecisionTreeRegressorSuite
       MLTestingUtils.testOversamplingVsWeighting[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 1.0), seed)
-      */
     }
   }
 

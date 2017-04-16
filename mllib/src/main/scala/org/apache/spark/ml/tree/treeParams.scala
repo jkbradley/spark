@@ -64,14 +64,18 @@ private[ml] trait DecisionTreeParams extends PredictorParams
    * Minimum number of instances each child must have after split.
    * If a split causes the left or right child to have fewer than minInstancesPerNode,
    * the split will be discarded as invalid.
-   * Should be >= 1.
+   * This threshold takes instance weights into account.
+   * Should be >= 0.  The value 0 is available for weighted instance support, where an instance
+   * could have weight < 1.0.
    * (default = 1)
    * @group param
    */
   final val minInstancesPerNode: IntParam = new IntParam(this, "minInstancesPerNode", "Minimum" +
     " number of instances each child must have after split.  If a split causes the left or right" +
     " child to have fewer than minInstancesPerNode, the split will be discarded as invalid." +
-    " Should be >= 1.", ParamValidators.gtEq(1))
+    " This threshold takes instance weights into account.  Should be >= 0.  The value 0 is" +
+    " available for weighted instance support, where an instance could have weight < 1.0.",
+    ParamValidators.gtEq(0))
 
   /**
    * Minimum fraction of the weighted sample count that each child must have after split.

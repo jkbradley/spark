@@ -276,9 +276,6 @@ object MLTestingUtils extends SparkFunSuite {
     val trueModel = estimator.set(estimator.weightCol, "").fit(data)
     val outlierModel = estimator.set(estimator.weightCol, "weight")
       .fit(outlierDS)
-    Seq(trueModel, outlierModel)
-      .foreach(t =>
-        println(t.asInstanceOf[org.apache.spark.ml.tree.DecisionTreeModel].toDebugString))
     modelEquals(trueModel, outlierModel)
   }
 
@@ -295,8 +292,6 @@ object MLTestingUtils extends SparkFunSuite {
       val df = data.withColumn("weight", lit(w))
       estimator.fit(df)
     }
-    models.foreach(t =>
-      println(t.asInstanceOf[org.apache.spark.ml.tree.DecisionTreeModel].toDebugString))
     models.sliding(2).foreach { case Seq(m1, m2) => modelEquals(m1, m2)}
   }
 

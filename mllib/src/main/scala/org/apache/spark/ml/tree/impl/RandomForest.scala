@@ -123,14 +123,6 @@ private[spark] object RandomForest extends Logging {
     logDebug(Range(0, metadata.numFeatures).map { featureIndex =>
       s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
     }.mkString("\n"))
-    println("SPLITS")
-    splits.foreach(ss =>
-      println(ss.map {
-        case s: ContinuousSplit =>
-          s"${s.featureIndex}:${s.threshold}"
-        case _ => throw new Exception()
-      }.mkString(", "))
-    )
 
     // Bin feature values (TreePoint representation).
     // Cache input RDD for speedup during multiple passes.
@@ -142,10 +134,6 @@ private[spark] object RandomForest extends Logging {
       .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement,
         (tp: TreePoint) => tp.weight, seed)
       .persist(StorageLevel.MEMORY_AND_DISK)
-    println("BAGGED INPUT")
-    baggedInput.take(20).foreach(bp =>
-      println((bp.subsampleWeights.mkString("[", ",", "]"), bp.datum.label, bp.datum.weight,
-        bp.datum.binnedFeatures.mkString("[", ",", "]"))))
 
     // depth of the decision tree
     val maxDepth = strategy.maxDepth
@@ -677,8 +665,9 @@ private[spark] object RandomForest extends Logging {
 
     val totalCount = leftCount + rightCount
 
-    val violatesMinInstancesPerNode = (leftCount < metadata.minInstancesPerNode) ||
-      (rightCount < metadata.minInstancesPerNode)
+    val violatesMinInstancesPerNode =
+      (leftCount == 0 || leftCount < metadata.minInstancesPerNode) ||
+      (rightCount == 0 || rightCount < metadata.minInstancesPerNode)
     val violatesMinWeightPerNode = (leftCount < metadata.minWeightPerNode) ||
       (rightCount < metadata.minWeightPerNode)
     // If left child or right child doesn't satisfy minimum weight per node or minimum

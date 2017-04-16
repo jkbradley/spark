@@ -78,7 +78,6 @@ class DecisionTreeClassifierSuite
     }
   }
 
-  /*
   test("params") {
     ParamsSuite.checkParams(new DecisionTreeClassifier)
     val model = new DecisionTreeClassificationModel("dtc", new LeafNode(0.0, 0.0, null), 1, 2)
@@ -369,34 +368,28 @@ class DecisionTreeClassifierSuite
     val dt = new DecisionTreeClassifier().setMaxDepth(1)
     dt.fit(df)
   }
-  */
 
   test("training with sample weights") {
     val df = linearMulticlassDataset
     val numClasses = 3
     val predEquals = (x: Double, y: Double) => x == y
     // (impurity, maxDepth)
-    /*
     val testParams = Seq(
       ("gini", 10),
       ("entropy", 10),
       ("gini", 5)
     )
-    */
-    val testParams = Seq(
-      ("gini", 1)
-    )
     for ((impurity, maxDepth) <- testParams) {
       val estimator = new DecisionTreeClassifier()
         .setMaxDepth(maxDepth)
         .setSeed(seed)
-        // .setMinWeightFractionPerNode(0.049)
         .setImpurity(impurity)
-
+        .setMinInstancesPerNode(0)
+      // We set minInstancesPerNode and minWeightFractionPerNode carefully to make the Estimator
+      // invariant to scaling in instance weights.
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 0.9))
-      /*
       MLTestingUtils.testOutliersWithSmallWeights[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
         numClasses, MLTestingUtils.modelPredictionEquals(df, predEquals, 0.8),
@@ -404,14 +397,13 @@ class DecisionTreeClassifierSuite
       MLTestingUtils.testOversamplingVsWeighting[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 1.0), seed)
-      */
     }
   }
 
   /////////////////////////////////////////////////////////////////////////////
   // Tests of model save/load
   /////////////////////////////////////////////////////////////////////////////
-  /*
+
   test("read/write") {
     def checkModelData(
         model: DecisionTreeClassificationModel,
@@ -456,7 +448,6 @@ class DecisionTreeClassifierSuite
 
     testDefaultReadWrite(model)
   }
-  */
 }
 
 private[ml] object DecisionTreeClassifierSuite extends SparkFunSuite {
