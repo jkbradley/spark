@@ -295,12 +295,14 @@ object MLTestingUtils extends SparkFunSuite {
       val df = data.withColumn("weight", lit(w))
       estimator.fit(df)
     }
+    models.foreach(t =>
+      println(t.asInstanceOf[org.apache.spark.ml.tree.DecisionTreeModel].toDebugString))
     models.sliding(2).foreach { case Seq(m1, m2) => modelEquals(m1, m2)}
   }
 
   def modelPredictionEquals[M <: PredictionModel[_, M]](
       data: DataFrame,
-      predictionRelativeError: Double,
+      compareFunc: (Double, Double) => Boolean,
       fractionInTol: Double)(
       model1: M,
       model2: M): Unit = {
@@ -309,7 +311,7 @@ object MLTestingUtils extends SparkFunSuite {
     val inTol = pred1.zip(pred2).count { case (p1, p2) =>
       val x = p1.getDouble(0)
       val y = p2.getDouble(0)
-      x ~== y relTol predictionRelativeError
+      compareFunc(x, y)
     }
     assert(inTol / pred1.length.toDouble >= fractionInTol)
   }

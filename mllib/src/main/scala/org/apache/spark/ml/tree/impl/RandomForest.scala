@@ -123,6 +123,14 @@ private[spark] object RandomForest extends Logging {
     logDebug(Range(0, metadata.numFeatures).map { featureIndex =>
       s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
     }.mkString("\n"))
+    println("SPLITS")
+    splits.foreach(ss =>
+      println(ss.map {
+        case s: ContinuousSplit =>
+          s"${s.featureIndex}:${s.threshold}"
+        case _ => throw new Exception()
+      }.mkString(", "))
+    )
 
     // Bin feature values (TreePoint representation).
     // Cache input RDD for speedup during multiple passes.
@@ -131,8 +139,13 @@ private[spark] object RandomForest extends Logging {
     val withReplacement = numTrees > 1
 
     val baggedInput = BaggedPoint
-      .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement, seed)
+      .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement,
+        (tp: TreePoint) => tp.weight, seed)
       .persist(StorageLevel.MEMORY_AND_DISK)
+    println("BAGGED INPUT")
+    baggedInput.take(20).foreach(bp =>
+      println((bp.subsampleWeights.mkString("[", ",", "]"), bp.datum.label, bp.datum.weight,
+        bp.datum.binnedFeatures.mkString("[", ",", "]"))))
 
     // depth of the decision tree
     val maxDepth = strategy.maxDepth
@@ -900,8 +913,8 @@ private[spark] object RandomForest extends Logging {
     val sampledInput = if (continuousFeatures.nonEmpty) {
       // Calculate the number of samples for approximate quantile calculation.
       val requiredSamples = math.max(metadata.maxBins * metadata.maxBins, 10000)
-      val fraction = if (requiredSamples < metadata.weightedNumExamples) {
-        requiredSamples.toDouble / metadata.weightedNumExamples
+      val fraction = if (requiredSamples < metadata.numExamples) {
+        requiredSamples.toDouble / metadata.numExamples
       } else {
         1.0
       }

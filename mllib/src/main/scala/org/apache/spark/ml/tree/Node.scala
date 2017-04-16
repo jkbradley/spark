@@ -266,6 +266,16 @@ private[tree] class LearningNode(
     var isLeaf: Boolean,
     var stats: ImpurityStats) extends Serializable {
 
+  override def toString: String = {
+    s"LearningNode(" +
+      s"id:$id," +
+      s" hasLeftChild:${leftChild.isDefined}," +
+      s" hasRightChild:${rightChild.isDefined}," +
+      s" split:${if (split.isDefined) split.get else "None"}," +
+      s" isLeft:$isLeaf," +
+      s" stats:$stats)"
+  }
+
   /**
    * Convert this [[LearningNode]] to a regular [[Node]], and recurse on any children.
    */

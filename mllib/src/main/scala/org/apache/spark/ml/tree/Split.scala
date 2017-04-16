@@ -80,6 +80,17 @@ class CategoricalSplit private[ml] (
   require(_leftCategories.forall(cat => 0 <= cat && cat < numCategories), "Invalid leftCategories" +
     s" (should be in range [0, $numCategories)): ${_leftCategories.mkString(",")}")
 
+  override def toString: String = {
+    val categoriesString = if (isLeft) {
+      categories.mkString("[", ",", "]") + " vs " +
+        setComplement(categories).mkString("[", ",", "]")
+    } else {
+      setComplement(categories).mkString("[", ",", "]") + " vs " +
+        categories.mkString("[", ",", "]")
+    }
+    s"CategoricalSplit($featureIndex:$categoriesString)"
+  }
+
   /**
    * If true, then "categories" is the set of categories for splitting to the left, and vice versa.
    */
@@ -156,6 +167,10 @@ class CategoricalSplit private[ml] (
  */
 class ContinuousSplit private[ml] (override val featureIndex: Int, val threshold: Double)
   extends Split {
+
+  override def toString: String = {
+    s"ContinuousSplit($featureIndex:$threshold)"
+  }
 
   override private[ml] def shouldGoLeft(features: Vector): Boolean = {
     features(featureIndex) <= threshold
