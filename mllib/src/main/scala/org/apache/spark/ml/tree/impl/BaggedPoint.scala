@@ -34,9 +34,6 @@ import org.apache.spark.util.random.XORShiftRandom
  *
  * @param datum  Data instance
  * @param subsampleWeights  Weight of this instance in each subsampled dataset.
- *
- * TODO: This does not currently support (Double) weighted instances.  Once MLlib has weighted
- *       dataset support, update.  (We store subsampleWeights as Double for this future extension.)
  */
 private[spark] class BaggedPoint[Datum](val datum: Datum, val subsampleWeights: Array[Double])
   extends Serializable

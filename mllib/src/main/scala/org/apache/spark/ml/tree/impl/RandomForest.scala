@@ -426,8 +426,6 @@ private[spark] object RandomForest extends Logging {
       if (nodeInfo != null) {
         val aggNodeIndex = nodeInfo.nodeIndexInGroup
         val featuresForNode = nodeInfo.featureSubset
-        //  val numSamples = baggedPoint.subsampleCounts(treeIndex)
-        //  val sampleWeight = baggedPoint.sampleWeight
         val instanceWeight = baggedPoint.subsampleWeights(treeIndex)
         if (metadata.unorderedFeatures.isEmpty) {
           orderedBinSeqOp(agg(aggNodeIndex), baggedPoint.datum, instanceWeight, featuresForNode)
