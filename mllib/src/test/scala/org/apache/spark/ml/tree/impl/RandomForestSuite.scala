@@ -18,7 +18,6 @@
 package org.apache.spark.ml.tree.impl
 
 import scala.collection.mutable
-import scala.language.implicitConversions
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.classification.DecisionTreeClassificationModel
@@ -96,7 +95,7 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         Array(6), Gini, QuantileStrategy.Sort,
         0, 0, 0.0, 0.0, 0, 0
       )
-      val featureSamples = Array.fill(200000)((1.0, math.random))
+      val featureSamples = Array.fill(200000)((math.random, 1.0))
       val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
       assert(splits.length === 5)
       assert(fakeMetadata.numSplits(0) === 5)
@@ -113,7 +112,7 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         Array(5), Gini, QuantileStrategy.Sort,
         0, 0, 0.0, 0.0, 0, 0
       )
-      val featureSamples = Array(1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3).map(x => (1.0, x.toDouble))
+      val featureSamples = Array(1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3).map(x => (x.toDouble, 1.0))
       val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
       assert(splits === Array(1.0, 2.0))
       // check returned splits are distinct
@@ -128,7 +127,7 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         0, 0, 0.0, 0.0, 0, 0
       )
       val featureSamples =
-        Array(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 4, 5).map(x => (1.0, x.toDouble))
+        Array(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 4, 5).map(x => (x.toDouble, 1.0))
       val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
       assert(splits === Array(2.0, 3.0))
     }
@@ -141,9 +140,25 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         0, 0, 0.0, 0.0, 0, 0
       )
       val featureSamples =
-        Array(0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2).map(x => (1.0, x.toDouble))
+        Array(0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2).map(x => (x.toDouble, 1.0))
       val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
       assert(splits === Array(1.0))
+    }
+
+    // find splits for constant feature
+    {
+      val fakeMetadata = new DecisionTreeMetadata(1, 0, 0.0, 0, 0,
+        Map(), Set(),
+        Array(3), Gini, QuantileStrategy.Sort,
+        0, 0, 0.0, 0.0, 0, 0
+      )
+      val featureSamples = Array(0, 0, 0).map(x => (x.toDouble, 1.0))
+      val featureSamplesEmpty = Array.empty[(Double, Double)]
+      val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
+      assert(splits === Array.empty[Double])
+      val splitsEmpty =
+        RandomForest.findSplitsForContinuousFeature(featureSamplesEmpty, fakeMetadata, 0)
+      assert(splitsEmpty === Array.empty[Double])
     }
 
     // find splits for arbitrarily scaled data
@@ -153,9 +168,9 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         Array(6), Gini, QuantileStrategy.Sort,
         0, 0, 0.0, 0.0, 0, 0
       )
-      val featureSamplesUnitWeight = Array.fill(10)((1.0, math.random))
-      val featureSamplesSmallWeight = featureSamplesUnitWeight.map { case (w, x) => (w * 0.001, x)}
-      val featureSamplesLargeWeight = featureSamplesUnitWeight.map { case (w, x) => (w * 1000, x)}
+      val featureSamplesUnitWeight = Array.fill(10)((math.random, 1.0))
+      val featureSamplesSmallWeight = featureSamplesUnitWeight.map { case (x, w) => (x, w * 0.001)}
+      val featureSamplesLargeWeight = featureSamplesUnitWeight.map { case (x, w) => (x, w * 1000)}
       val splitsUnitWeight = RandomForest
         .findSplitsForContinuousFeature(featureSamplesUnitWeight, fakeMetadata, 0)
       val splitsSmallWeight = RandomForest
@@ -173,8 +188,8 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
         Array(3), Gini, QuantileStrategy.Sort,
         0, 0, 0.0, 0.0, 0, 0
       )
-      val featureSamples = Array((10, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6)).map {
-        case (w, x) => (w.toDouble, x.toDouble)
+      val featureSamples = Array((1, 10.0), (2, 1.0), (3, 1.0), (4, 1.0), (5, 1.0), (6, 1.0)).map {
+        case (x, w) => (x.toDouble, w.toDouble)
       }
       val splits = RandomForest.findSplitsForContinuousFeature(featureSamples, fakeMetadata, 0)
       assert(splits === Array(1.0, 2.0))
@@ -634,7 +649,7 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
     val rddWithBigWeights = rddWithUnitWeights.map { inst =>
       Instance(inst.label, 1000, inst.features)
     }
-    val strategy = new OldStrategy(OldAlgo.Classification, Gini, 3, 2)
+    val strategy = new OldStrategy(OldAlgo.Classification, Gini, 3, 2, minInstancesPerNode = 0)
     val unitWeightTrees = RandomForest.run(rddWithUnitWeights, strategy, 3, "all", 42L, None)
 
     val smallWeightTrees = RandomForest.run(rddWithSmallWeights, strategy, 3, "all", 42L, None)
@@ -649,30 +664,34 @@ class RandomForestSuite extends SparkFunSuite with MLlibTestSparkContext {
   }
 
   test("minWeightFraction and minInstancesPerNode") {
+    val smallWeight = 0.1
     val data = Array(
       Instance(0.0, 1.0, Vectors.dense(0.0)),
       Instance(0.0, 1.0, Vectors.dense(0.0)),
       Instance(0.0, 1.0, Vectors.dense(0.0)),
       Instance(0.0, 1.0, Vectors.dense(0.0)),
-      Instance(1.0, 0.1, Vectors.dense(1.0))
+      Instance(1.0, smallWeight, Vectors.dense(1.0))
     )
+    val minWeightFractionPerNodeThreshold = smallWeight / (smallWeight + (data.length - 1))
     val rdd = sc.parallelize(data)
     val strategy = new OldStrategy(OldAlgo.Classification, Gini, 3, 2)
-    strategy.minWeightFractionPerNode = 0.5
-    val Array(tree1) = RandomForest.run(rdd, strategy, 1, "all", 42L, None)
-    assert(tree1.depth == 0)
 
-    strategy.minWeightFractionPerNode = 0.0
-    val Array(tree2) = RandomForest.run(rdd, strategy, 1, "all", 42L, None)
-    assert(tree2.depth == 1)
+    def testForest(
+        minInstancesPerNode: Int,
+        minWeightFractionPerNode: Double,
+        expectedDepth: Int): Unit = {
+      strategy.minInstancesPerNode = minInstancesPerNode
+      strategy.minWeightFractionPerNode = minWeightFractionPerNode
+      val Array(tree) = RandomForest.run(rdd, strategy, 1, "all", 42L, None)
+      assert(tree.depth === expectedDepth)
+    }
 
-    strategy.minInstancesPerNode = 2
-    val Array(tree3) = RandomForest.run(rdd, strategy, 1, "all", 42L, None)
-    assert(tree3.depth == 0)
-
-    strategy.minInstancesPerNode = 1
-    val Array(tree4) = RandomForest.run(rdd, strategy, 1, "all", 42L, None)
-    assert(tree4.depth == 1)
+    testForest(minInstancesPerNode = 1, minWeightFractionPerNode = 0.0, expectedDepth = 0)
+    testForest(minInstancesPerNode = 0, minWeightFractionPerNode = 0.0, expectedDepth = 1)
+    testForest(minInstancesPerNode = 0,
+      minWeightFractionPerNode = minWeightFractionPerNodeThreshold, expectedDepth = 1)
+    testForest(minInstancesPerNode = 0,
+      minWeightFractionPerNode = minWeightFractionPerNodeThreshold + 0.01, expectedDepth = 0)
   }
 
 }

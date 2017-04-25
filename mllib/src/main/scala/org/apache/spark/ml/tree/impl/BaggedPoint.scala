@@ -127,4 +127,5 @@ private[spark] object BaggedPoint {
       extractSampleWeight: (Datum => Double)): RDD[BaggedPoint[Datum]] = {
     input.map(datum => new BaggedPoint(datum, Array(extractSampleWeight(datum))))
   }
+
 }

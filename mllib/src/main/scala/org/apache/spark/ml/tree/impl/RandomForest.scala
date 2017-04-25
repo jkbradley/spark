@@ -83,7 +83,7 @@ private[spark] object RandomForest extends Logging {
   /**
    * Train a random forest.
    *
-   * @param input Training data: RDD of [[org.apache.spark.ml.feature.Instance]]
+   * @param input Training data: RDD of `Instance`
    * @return an unweighted set of trees
    */
   def run(
@@ -104,7 +104,6 @@ private[spark] object RandomForest extends Logging {
     val retaggedInput = input.retag(classOf[Instance])
     val metadata =
       DecisionTreeMetadata.buildMetadata(retaggedInput, strategy, numTrees, featureSubsetStrategy)
-
     instr match {
       case Some(instrumentation) =>
         instrumentation.logNumFeatures(metadata.numFeatures)
@@ -737,8 +736,7 @@ private[spark] object RandomForest extends Logging {
           // Find best split.
           val (bestFeatureSplitIndex, bestFeatureGainStats) =
             Range(0, numSplits).map { case splitIdx =>
-              val leftChildStats =
-                binAggregates.getImpurityCalculator(nodeFeatureOffset, splitIdx)
+              val leftChildStats = binAggregates.getImpurityCalculator(nodeFeatureOffset, splitIdx)
               val rightChildStats =
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits)
               rightChildStats.subtract(leftChildStats)
@@ -926,7 +924,7 @@ private[spark] object RandomForest extends Logging {
       val numPartitions = math.min(continuousFeatures.length, input.partitions.length)
 
       input
-        .flatMap(point => continuousFeatures.map(idx => (idx, (point.weight, point.features(idx)))))
+        .flatMap(point => continuousFeatures.map(idx => (idx, (point.features(idx), point.weight))))
         .groupByKey(numPartitions)
         .map { case (idx, samples) =>
           val thresholds = findSplitsForContinuousFeature(samples, metadata, idx)
@@ -990,7 +988,7 @@ private[spark] object RandomForest extends Logging {
    *       could be different from the specified `numSplits`.
    *       The `numSplits` attribute in the `DecisionTreeMetadata` class will be set accordingly.
    *
-   * @param featureSamples feature values and sample weights of each sample
+   * @param featureSamples (feature value, instance weight) for each instance in the sample
    * @param metadata decision tree metadata
    *                 NOTE: `metadata.numbins` will be changed accordingly
    *                       if there are not enough splits to be found
@@ -1011,7 +1009,7 @@ private[spark] object RandomForest extends Logging {
 
       // get count for each distinct value
       val (valueCountMap, numSamples) = featureSamples.foldLeft((Map.empty[Double, Double], 0.0)) {
-        case ((m, cnt), (w, x)) =>
+        case ((m, cnt), (x, w)) =>
           (m + ((x, m.getOrElse(x, 0.0) + w)), cnt + w)
       }
       // sort distinct values

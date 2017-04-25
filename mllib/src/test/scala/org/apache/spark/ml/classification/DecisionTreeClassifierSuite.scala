@@ -385,8 +385,8 @@ class DecisionTreeClassifierSuite
         .setSeed(seed)
         .setImpurity(impurity)
         .setMinInstancesPerNode(0)
-      // We set minInstancesPerNode and minWeightFractionPerNode carefully to make the Estimator
-      // invariant to scaling in instance weights.
+      // We set minInstancesPerNode = 0 to make the Estimator invariant to scaling in instance
+      // weights.
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeClassificationModel,
         DecisionTreeClassifier](df.as[LabeledPoint], estimator,
         MLTestingUtils.modelPredictionEquals(df, predEquals, 0.9))

@@ -85,7 +85,7 @@ private[ml] trait DecisionTreeParams extends PredictorParams
    * Minimum fraction of the weighted sample count that each child must have after split.
    * If a split causes the fraction of the total weight in the left or right child to be less than
    * minWeightFractionPerNode, the split will be discarded as invalid.
-   * Should be in the interval [0.0, 0.5).
+   * Should be in the interval [0.0, 0.5].
    * (default = 0.0)
    * @group param
    */
@@ -93,8 +93,7 @@ private[ml] trait DecisionTreeParams extends PredictorParams
     "minWeightFractionPerNode", "Minimum fraction of the weighted sample count that each child " +
     "must have after split. If a split causes the fraction of the total weight in the left or " +
     "right child to be less than minWeightFractionPerNode, the split will be discarded as " +
-    "invalid. Should be in interval [0.0, 0.5)",
-    ParamValidators.inRange(0.0, 0.5, lowerInclusive = true, upperInclusive = false))
+    "invalid. Should be in interval [0.0, 0.5]", ParamValidators.inRange(0.0, 0.5))
 
   /**
    * Minimum information gain for a split to be considered at a tree node.

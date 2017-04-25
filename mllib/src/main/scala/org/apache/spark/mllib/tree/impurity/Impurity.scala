@@ -185,10 +185,7 @@ private[spark] object ImpurityCalculator {
    * Create an [[ImpurityCalculator]] instance of the given impurity type and with
    * the given stats.
    */
-  def getCalculator(
-      impurity: String,
-      stats: Array[Double],
-      rawCount: Long): ImpurityCalculator = {
+  def getCalculator(impurity: String, stats: Array[Double]): ImpurityCalculator = {
     impurity.toLowerCase(Locale.ROOT) match {
       case "gini" => new GiniCalculator(stats)
       case "entropy" => new EntropyCalculator(stats)

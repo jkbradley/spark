@@ -33,6 +33,7 @@ import org.apache.spark.mllib.tree.model.{RandomForestModel => OldRandomForestMo
 import org.apache.spark.sql.{DataFrame, Dataset}
 import org.apache.spark.sql.functions.{col, udf}
 
+
 /**
  * <a href="http://en.wikipedia.org/wiki/Random_forest">Random Forest</a>
  * learning algorithm for regression.
@@ -114,7 +115,6 @@ class RandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override val uid: S
   override protected def train(dataset: Dataset[_]): RandomForestRegressionModel = {
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
-
     val instances = extractLabeledPoints(dataset).map(_.toInstance(1.0))
     val strategy =
       super.getOldStrategy(categoricalFeatures, numClasses = 0, OldAlgo.Regression, getOldImpurity)

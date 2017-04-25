@@ -251,8 +251,8 @@ object MLTestingUtils extends SparkFunSuite {
       seed: Long): Unit = {
     val (overSampledData, weightedData) = genEquivalentOversampledAndWeightedInstances(
       data, seed)
-    val overSampledModel = estimator.set(estimator.weightCol, "").fit(overSampledData)
     val weightedModel = estimator.set(estimator.weightCol, "weight").fit(weightedData)
+    val overSampledModel = estimator.set(estimator.weightCol, "").fit(overSampledData)
     modelEquals(weightedModel, overSampledModel)
   }
 
@@ -274,8 +274,7 @@ object MLTestingUtils extends SparkFunSuite {
         List.fill(outlierRatio)(Instance(outlierLabel, 0.0001, f)) ++ List(Instance(l, w, f))
     }
     val trueModel = estimator.set(estimator.weightCol, "").fit(data)
-    val outlierModel = estimator.set(estimator.weightCol, "weight")
-      .fit(outlierDS)
+    val outlierModel = estimator.set(estimator.weightCol, "weight").fit(outlierDS)
     modelEquals(trueModel, outlierModel)
   }
 

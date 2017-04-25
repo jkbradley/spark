@@ -185,7 +185,6 @@ class DecisionTreeClassificationModel private[ml] (
 
   /**
    * Construct a decision tree classification model.
-   *
    * @param rootNode  Root node of tree, with other nodes attached.
    */
   private[ml] def this(rootNode: Node, numFeatures: Int, numClasses: Int) =

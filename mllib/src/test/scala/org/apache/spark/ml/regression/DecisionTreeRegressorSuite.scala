@@ -24,7 +24,8 @@ import org.apache.spark.ml.tree.impl.TreeTests
 import org.apache.spark.ml.util.{DefaultReadWriteTest, MLTestingUtils}
 import org.apache.spark.ml.util.TestingUtils._
 import org.apache.spark.mllib.regression.{LabeledPoint => OldLabeledPoint}
-import org.apache.spark.mllib.tree.{DecisionTree => OldDecisionTree, DecisionTreeSuite => OldDecisionTreeSuite}
+import org.apache.spark.mllib.tree.{DecisionTree => OldDecisionTree,
+  DecisionTreeSuite => OldDecisionTreeSuite}
 import org.apache.spark.mllib.util.{LinearDataGenerator, MLlibTestSparkContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
@@ -158,25 +159,24 @@ class DecisionTreeRegressorSuite
   test("training with sample weights") {
     val df = linearRegressionData
     val numClasses = 0
-    val predEquals = (x: Double, y: Double) => x ~== y relTol 0.05
     val testParams = Seq(5, 10)
     for (maxDepth <- testParams) {
       val estimator = new DecisionTreeRegressor()
         .setMaxDepth(maxDepth)
         .setSeed(1234)
         .setMinInstancesPerNode(0)
-      // We set minInstancesPerNode and minWeightFractionPerNode carefully to make the Estimator
-      // invariant to scaling in instance weights.
+      // We set minInstancesPerNode = 0 to make the Estimator invariant to scaling in instance
+      // weights.
       MLTestingUtils.testArbitrarilyScaledWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
-        MLTestingUtils.modelPredictionEquals(df, predEquals, 0.9))
+        MLTestingUtils.modelPredictionEquals(df, RelativeErrorComparison(_, _, 0.05), 0.9))
       MLTestingUtils.testOutliersWithSmallWeights[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator, numClasses,
-        MLTestingUtils.modelPredictionEquals(df, predEquals, 0.8),
+        MLTestingUtils.modelPredictionEquals(df, RelativeErrorComparison(_, _, 0.1), 0.8),
         outlierRatio = 2)
       MLTestingUtils.testOversamplingVsWeighting[DecisionTreeRegressionModel,
         DecisionTreeRegressor](df.as[LabeledPoint], estimator,
-        MLTestingUtils.modelPredictionEquals(df, predEquals, 1.0), seed)
+        MLTestingUtils.modelPredictionEquals(df, RelativeErrorComparison(_, _, 0.01), 1.0), seed)
     }
   }
 
